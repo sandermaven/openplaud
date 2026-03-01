@@ -53,6 +53,7 @@ export async function POST(request: Request) {
         }
 
         const deviceList = await client.listDevices();
+        console.log("Plaud device list response:", JSON.stringify(deviceList));
 
         const encryptedToken = encrypt(bearerToken);
 
@@ -79,7 +80,8 @@ export async function POST(request: Request) {
             });
         }
 
-        for (const device of deviceList.data_devices) {
+        const devices = deviceList.data_devices ?? [];
+        for (const device of devices) {
             const [existingDevice] = await db
                 .select()
                 .from(plaudDevices)
@@ -114,7 +116,7 @@ export async function POST(request: Request) {
 
         return NextResponse.json({
             success: true,
-            devices: deviceList.data_devices,
+            devices,
         });
     } catch (error) {
         console.error("Error connecting to Plaud:", error);
