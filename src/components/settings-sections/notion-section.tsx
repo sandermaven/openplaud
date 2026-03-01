@@ -46,6 +46,22 @@ export function NotionSection() {
     const [config, setConfig] = useState<NotionConfig | null>(null);
     const [token, setToken] = useState("");
     const [databaseId, setDatabaseId] = useState("");
+
+    // Extract database ID from full Notion URL or raw ID
+    const parseDatabaseId = (input: string): string => {
+        const trimmed = input.trim();
+        // Match 32-char hex ID from URL like https://www.notion.so/workspace/9ac49c1f8ea84c42a8d41185d4bf86fe?v=...
+        const urlMatch = trimmed.match(
+            /([0-9a-f]{32})(?:\?|$)/i,
+        );
+        if (urlMatch) return urlMatch[1];
+        // Match UUID format (with dashes)
+        const uuidMatch = trimmed.match(
+            /([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})/i,
+        );
+        if (uuidMatch) return uuidMatch[1];
+        return trimmed;
+    };
     const [enabled, setEnabled] = useState(true);
     const [autoSave, setAutoSave] = useState(true);
     const [defaultTags, setDefaultTags] = useState("Knowledge");
@@ -322,12 +338,13 @@ export function NotionSection() {
                         id="notion-database-id"
                         type="text"
                         value={databaseId}
-                        onChange={(e) => setDatabaseId(e.target.value)}
-                        placeholder="xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx"
+                        onChange={(e) =>
+                            setDatabaseId(parseDatabaseId(e.target.value))
+                        }
+                        placeholder="Paste database URL or ID"
                     />
                     <p className="text-xs text-muted-foreground">
-                        The ID from your Notion database URL (32 characters
-                        after the workspace name)
+                        Paste the full Notion database URL or just the ID
                     </p>
                 </div>
 
