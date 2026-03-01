@@ -1,5 +1,9 @@
+import { eq } from "drizzle-orm";
 import { NextResponse } from "next/server";
+import { db } from "@/db";
+import { notionConfig } from "@/db/schema";
 import { auth } from "@/lib/auth";
+import { decrypt } from "@/lib/encryption";
 import { verifyNotionConnection } from "@/lib/notion/verify";
 
 // POST - Verify Notion connection
@@ -16,16 +20,38 @@ export async function POST(request: Request) {
             );
         }
 
-        const { token, databaseId } = await request.json();
+        const { token, databaseId, useSaved } = await request.json();
 
-        if (!token || !databaseId) {
+        let resolvedToken = token;
+        let resolvedDatabaseId = databaseId;
+
+        // If no token provided, try to use the saved one
+        if (!resolvedToken && useSaved) {
+            const [config] = await db
+                .select()
+                .from(notionConfig)
+                .where(eq(notionConfig.userId, session.user.id))
+                .limit(1);
+
+            if (config) {
+                resolvedToken = decrypt(config.encryptedToken);
+                if (!resolvedDatabaseId) {
+                    resolvedDatabaseId = config.databaseId;
+                }
+            }
+        }
+
+        if (!resolvedToken || !resolvedDatabaseId) {
             return NextResponse.json(
-                { error: "Token and database ID are required" },
+                { success: false, error: "Token and database ID are required" },
                 { status: 400 },
             );
         }
 
-        const result = await verifyNotionConnection(token, databaseId);
+        const result = await verifyNotionConnection(
+            resolvedToken,
+            resolvedDatabaseId,
+        );
 
         return NextResponse.json(result);
     } catch (error) {

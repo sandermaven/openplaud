@@ -123,19 +123,10 @@ export function NotionSection() {
             return;
         }
 
-        if (!testDbId) {
+        if (!testDbId && !config) {
             setVerifyResult({
                 type: "error",
                 message: "Please enter a database ID first",
-            });
-            return;
-        }
-
-        if (!testToken) {
-            setVerifyResult({
-                type: "error",
-                message:
-                    "Please enter the integration token to test the connection",
             });
             return;
         }
@@ -149,7 +140,8 @@ export function NotionSection() {
                 headers: { "Content-Type": "application/json" },
                 body: JSON.stringify({
                     token: testToken,
-                    databaseId: testDbId,
+                    databaseId: testDbId || undefined,
+                    useSaved: !testToken || !testDbId,
                 }),
             });
 
