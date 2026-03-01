@@ -27,11 +27,18 @@ export async function verifyNotionConnection(
             database_id: databaseId,
         });
 
+        console.log(
+            "Notion database retrieve response keys:",
+            Object.keys(database),
+            "object:",
+            database.object,
+        );
+
         // Check if we got a full database response with properties
         if (!("properties" in database) || !database.properties) {
             return {
                 success: false,
-                error: "Could not retrieve full database details. Check integration permissions.",
+                error: "The integration can see this database but lacks full read access. In Notion, go to Settings > Connections > your integration, and make sure it has 'Read content' enabled. Then re-share the database with the integration.",
             };
         }
 
@@ -77,6 +84,7 @@ export async function verifyNotionConnection(
             databaseTitle,
         };
     } catch (error) {
+        console.error("Notion verify error:", error);
         if (error instanceof Error) {
             if (error.message.includes("Could not find database")) {
                 return {
