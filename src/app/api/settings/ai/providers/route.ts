@@ -127,9 +127,11 @@ export async function POST(request: Request) {
 
         return NextResponse.json({ provider: newProvider });
     } catch (error) {
-        console.error("Error adding provider:", error);
+        const message =
+            error instanceof Error ? error.message : String(error);
+        console.error("Error adding provider:", message, error);
         return NextResponse.json(
-            { error: "Failed to add provider" },
+            { error: `Failed to add provider: ${message}` },
             { status: 500 },
         );
     }

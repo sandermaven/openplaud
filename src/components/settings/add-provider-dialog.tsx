@@ -116,7 +116,10 @@ export function AddProviderDialog({
                 }),
             });
 
-            if (!response.ok) throw new Error("Failed to add provider");
+            if (!response.ok) {
+                const data = await response.json().catch(() => ({}));
+                throw new Error(data.error || `Server error ${response.status}`);
+            }
 
             toast.success("AI provider added successfully");
             onSuccess();
@@ -128,8 +131,10 @@ export function AddProviderDialog({
             setDefaultModel("");
             setIsDefaultTranscription(false);
             setIsDefaultEnhancement(false);
-        } catch {
-            toast.error("Failed to add AI provider");
+        } catch (err) {
+            toast.error(
+                err instanceof Error ? err.message : "Failed to add AI provider",
+            );
         } finally {
             setIsLoading(false);
         }
