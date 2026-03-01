@@ -14,7 +14,6 @@ CREATE TABLE "notion_config" (
 	CONSTRAINT "notion_config_user_id_unique" UNIQUE("user_id")
 );
 --> statement-breakpoint
-ALTER TABLE "plaud_connections" ADD COLUMN "api_base" text DEFAULT 'https://api.plaud.ai' NOT NULL;--> statement-breakpoint
 ALTER TABLE "transcriptions" ADD COLUMN "notion_page_id" text;--> statement-breakpoint
 ALTER TABLE "transcriptions" ADD COLUMN "notion_page_url" text;--> statement-breakpoint
 ALTER TABLE "transcriptions" ADD COLUMN "notion_sync_status" text DEFAULT 'pending';--> statement-breakpoint
