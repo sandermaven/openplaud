@@ -1,5 +1,3 @@
-import { createNotionClientFromToken } from "./client";
-
 interface VerifyResult {
     success: boolean;
     databaseTitle?: string;
@@ -13,32 +11,53 @@ interface DatabaseProperty {
 
 /**
  * Verify a Notion connection by testing the token and database access.
- * Uses raw (unencrypted) token for testing before saving.
+ * Uses raw fetch to the Notion API with a pinned API version (2022-06-28)
+ * that returns `properties` on database objects. The SDK v5 defaults to
+ * 2025-09-03 which replaced `properties` with `data_sources`.
  */
 export async function verifyNotionConnection(
     token: string,
     databaseId: string,
 ): Promise<VerifyResult> {
     try {
-        const client = createNotionClientFromToken(token);
-
-        // Retrieve the database to verify access
-        const database = await client.databases.retrieve({
-            database_id: databaseId,
-        });
-
-        console.log(
-            "Notion database retrieve response keys:",
-            Object.keys(database),
-            "object:",
-            database.object,
+        // Use raw fetch with pinned API version to get properties
+        const response = await fetch(
+            `https://api.notion.com/v1/databases/${databaseId}`,
+            {
+                headers: {
+                    Authorization: `Bearer ${token}`,
+                    "Notion-Version": "2022-06-28",
+                },
+            },
         );
 
-        // Check if we got a full database response with properties
-        if (!("properties" in database) || !database.properties) {
+        if (!response.ok) {
+            const body = await response.json().catch(() => ({}));
+            const msg =
+                (body as { message?: string }).message || response.statusText;
+
+            if (response.status === 404) {
+                return {
+                    success: false,
+                    error: "Database not found. Check the database ID and ensure the integration has access.",
+                };
+            }
+            if (response.status === 401) {
+                return {
+                    success: false,
+                    error: "Invalid integration token. Check your Notion integration settings.",
+                };
+            }
+            return { success: false, error: msg };
+        }
+
+        const database = (await response.json()) as Record<string, unknown>;
+
+        // Check if we got properties
+        if (!database.properties || typeof database.properties !== "object") {
             return {
                 success: false,
-                error: "The integration can see this database but lacks full read access. In Notion, go to Settings > Connections > your integration, and make sure it has 'Read content' enabled. Then re-share the database with the integration.",
+                error: "Could not retrieve database properties. Check integration permissions.",
             };
         }
 
@@ -72,10 +91,9 @@ export async function verifyNotionConnection(
         }
 
         // Extract database title
-        const titleParts =
-            "title" in database
-                ? (database.title as Array<{ plain_text: string }>)
-                : [];
+        const titleParts = Array.isArray(database.title)
+            ? (database.title as Array<{ plain_text: string }>)
+            : [];
         const databaseTitle =
             titleParts.map((t) => t.plain_text).join("") || "Untitled";
 
