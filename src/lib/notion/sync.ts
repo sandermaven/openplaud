@@ -93,9 +93,12 @@ export async function syncTranscriptionToNotion(
                 },
             },
             Tags: {
-                multi_select: (config.defaultTags || ["Knowledge"]).map(
-                    (tag: string) => ({ name: tag }),
-                ),
+                multi_select: [
+                    ...new Set([
+                        ...(config.defaultTags || ["Knowledge"]),
+                        "AI transcript",
+                    ]),
+                ].map((tag: string) => ({ name: tag })),
             },
             URL: {
                 url: recordingUrl,
