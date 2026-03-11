@@ -32,6 +32,9 @@ const envSchema = z.object({
         .transform((val) => val === "true"),
     SMTP_USER: z.string().optional(),
     SMTP_PASSWORD: z.string().optional(),
+    CAL_WEBHOOK_URL: z.string().url().optional(),
+    CAL_WEBHOOK_SECRET: z.string().optional(),
+
     SMTP_FROM: z
         .string()
         .optional()
@@ -78,6 +81,8 @@ function validateEnv(): Env {
             SMTP_USER: process.env.SMTP_USER,
             SMTP_PASSWORD: process.env.SMTP_PASSWORD,
             SMTP_FROM: process.env.SMTP_FROM,
+            CAL_WEBHOOK_URL: process.env.CAL_WEBHOOK_URL,
+            CAL_WEBHOOK_SECRET: process.env.CAL_WEBHOOK_SECRET,
         });
 
         // In runtime (dev/prod servers), we require a strong encryption key.

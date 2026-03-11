@@ -7,6 +7,7 @@ import {
     transcriptions,
 } from "@/db/schema";
 import { env } from "@/lib/env";
+import { notifyCalWebhook } from "@/lib/notion/cal-notify";
 import { buildNotionPageContent } from "./blocks";
 import { createNotionClient } from "./client";
 
@@ -154,6 +155,14 @@ export async function syncTranscriptionToNotion(
                 notionSyncedAt: new Date(),
             })
             .where(eq(transcriptions.id, transcriptionId));
+
+        // Notify Cal so it can send a Telegram message
+        notifyCalWebhook({
+            title: recording.filename,
+            notionPageUrl: pageUrl ?? "",
+            summary: enhancement?.summary ?? undefined,
+            recordingDate: recording.startTime.toISOString(),
+        });
     } catch (error) {
         console.error("Notion sync failed:", error);
 
