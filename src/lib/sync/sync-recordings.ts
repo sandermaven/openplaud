@@ -16,7 +16,7 @@ const SYNC_CONFIG = {
     /** Number of recordings to fetch per API call */
     PAGE_SIZE: 50,
     /** Number of recordings to download concurrently */
-    BATCH_CONCURRENCY: 5,
+    BATCH_CONCURRENCY: 2,
     /** Maximum pages to process in a single sync (prevents runaway) */
     MAX_PAGES: 20,
 } as const;
