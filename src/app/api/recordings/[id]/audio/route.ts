@@ -1,10 +1,11 @@
-import { createReadStream, statSync } from "node:fs";
+import { createReadStream, existsSync, statSync } from "node:fs";
 import type { Readable } from "node:stream";
 import { and, eq } from "drizzle-orm";
 import { NextResponse } from "next/server";
 import { db } from "@/db";
-import { recordings } from "@/db/schema";
+import { plaudConnections, recordings } from "@/db/schema";
 import { auth } from "@/lib/auth";
+import { createPlaudClient } from "@/lib/plaud/client";
 import { createUserStorageProvider } from "@/lib/storage/factory";
 import { LocalStorage } from "@/lib/storage/local-storage";
 import { S3Storage } from "@/lib/storage/s3-storage";
@@ -85,78 +86,97 @@ export async function GET(
             return NextResponse.redirect(signedUrl, 302);
         }
 
-        // Local storage: stream from disk instead of buffering into memory
+        // Local storage: stream from disk if file exists
         if (storage instanceof LocalStorage) {
             const filePath = storage.getFilePath(recording.storagePath);
-            const stat = statSync(filePath);
-            const fileSize = stat.size;
-            const contentType = getContentType(recording.storagePath);
-            const rangeHeader = request.headers.get("range");
 
-            if (rangeHeader) {
-                const rangeMatch = rangeHeader.match(/bytes=(\d+)-(\d*)/);
-                if (rangeMatch) {
-                    const start = parseInt(rangeMatch[1], 10);
-                    const end = rangeMatch[2]
-                        ? parseInt(rangeMatch[2], 10)
-                        : fileSize - 1;
+            if (existsSync(filePath)) {
+                const stat = statSync(filePath);
+                const fileSize = stat.size;
+                const contentType = getContentType(recording.storagePath);
+                const rangeHeader = request.headers.get("range");
 
-                    if (
-                        start < 0 ||
-                        start >= fileSize ||
-                        end < 0 ||
-                        end >= fileSize ||
-                        start > end
-                    ) {
-                        return new NextResponse(null, {
-                            status: 416,
+                if (rangeHeader) {
+                    const rangeMatch = rangeHeader.match(/bytes=(\d+)-(\d*)/);
+                    if (rangeMatch) {
+                        const start = parseInt(rangeMatch[1], 10);
+                        const end = rangeMatch[2]
+                            ? parseInt(rangeMatch[2], 10)
+                            : fileSize - 1;
+
+                        if (
+                            start < 0 ||
+                            start >= fileSize ||
+                            end < 0 ||
+                            end >= fileSize ||
+                            start > end
+                        ) {
+                            return new NextResponse(null, {
+                                status: 416,
+                                headers: {
+                                    "Content-Range": `bytes */${fileSize}`,
+                                },
+                            });
+                        }
+
+                        const chunkSize = end - start + 1;
+                        const stream = createReadStream(filePath, {
+                            start,
+                            end,
+                        });
+
+                        return new NextResponse(readableNodeToWeb(stream), {
+                            status: 206,
                             headers: {
-                                "Content-Range": `bytes */${fileSize}`,
+                                "Content-Type": contentType,
+                                "Content-Length": chunkSize.toString(),
+                                "Content-Range": `bytes ${start}-${end}/${fileSize}`,
+                                "Accept-Ranges": "bytes",
+                                "Cache-Control":
+                                    "public, max-age=31536000, immutable",
                             },
                         });
                     }
-
-                    const chunkSize = end - start + 1;
-                    const stream = createReadStream(filePath, { start, end });
-
-                    return new NextResponse(readableNodeToWeb(stream), {
-                        status: 206,
-                        headers: {
-                            "Content-Type": contentType,
-                            "Content-Length": chunkSize.toString(),
-                            "Content-Range": `bytes ${start}-${end}/${fileSize}`,
-                            "Accept-Ranges": "bytes",
-                            "Cache-Control":
-                                "public, max-age=31536000, immutable",
-                        },
-                    });
                 }
+
+                const stream = createReadStream(filePath);
+
+                return new NextResponse(readableNodeToWeb(stream), {
+                    headers: {
+                        "Content-Type": contentType,
+                        "Content-Length": fileSize.toString(),
+                        "Accept-Ranges": "bytes",
+                        "Cache-Control": "public, max-age=31536000, immutable",
+                    },
+                });
             }
-
-            const stream = createReadStream(filePath);
-
-            return new NextResponse(readableNodeToWeb(stream), {
-                headers: {
-                    "Content-Type": contentType,
-                    "Content-Length": fileSize.toString(),
-                    "Accept-Ranges": "bytes",
-                    "Cache-Control": "public, max-age=31536000, immutable",
-                },
-            });
         }
 
-        // Fallback: buffer-based for unknown storage providers
-        const audioBuffer = await storage.downloadFile(recording.storagePath);
-        const contentType = getContentType(recording.storagePath);
+        // File not on disk (cleaned up after transcription) — redirect to Plaud temp URL
+        if (recording.plaudFileId) {
+            const [connection] = await db
+                .select()
+                .from(plaudConnections)
+                .where(eq(plaudConnections.userId, session.user.id))
+                .limit(1);
 
-        return new NextResponse(new Uint8Array(audioBuffer), {
-            headers: {
-                "Content-Type": contentType,
-                "Content-Length": audioBuffer.length.toString(),
-                "Accept-Ranges": "bytes",
-                "Cache-Control": "public, max-age=31536000, immutable",
-            },
-        });
+            if (connection) {
+                const plaudClient = await createPlaudClient(
+                    connection.bearerToken,
+                    connection.apiBase,
+                );
+                const tempUrl = await plaudClient.getTempUrl(
+                    recording.plaudFileId,
+                    false,
+                );
+                return NextResponse.redirect(tempUrl.temp_url, 302);
+            }
+        }
+
+        return NextResponse.json(
+            { error: "Audio file not available" },
+            { status: 404 },
+        );
     } catch (error) {
         console.error("Error streaming audio:", error);
         return NextResponse.json(
