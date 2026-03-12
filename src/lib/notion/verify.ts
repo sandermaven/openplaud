@@ -81,7 +81,6 @@ export async function verifyNotionConnection(
         const missingProps: string[] = [];
         if (!hasTitle) missingProps.push("Name (title)");
         if (!hasStatus) missingProps.push("Status");
-        if (!hasTags) missingProps.push("Tags (multi_select)");
 
         if (missingProps.length > 0) {
             return {

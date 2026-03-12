@@ -93,15 +93,19 @@ export async function syncTranscriptionToNotion(
                     name: "Inbox",
                 },
             },
-            Tags: {
-                multi_select: (config.defaultTags || ["Knowledge"]).map(
-                    (tag: string) => ({ name: tag }),
-                ),
-            },
             URL: {
                 url: recordingUrl,
             },
         };
+
+        // Only set Tags if configured (property may not exist in database)
+        if (config.defaultTags && config.defaultTags.length > 0) {
+            properties.Tags = {
+                multi_select: config.defaultTags.map((tag: string) => ({
+                    name: tag,
+                })),
+            };
+        }
 
         // Create the page
         const page = await client.pages.create({
