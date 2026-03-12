@@ -2,10 +2,11 @@ import { and, eq } from "drizzle-orm";
 import { NextResponse } from "next/server";
 import { OpenAI } from "openai";
 import { db } from "@/db";
-import { apiCredentials, notionConfig, recordings, transcriptions } from "@/db/schema";
+import { apiCredentials, notionConfig, plaudConnections, recordings, transcriptions } from "@/db/schema";
 import { auth } from "@/lib/auth";
 import { decrypt } from "@/lib/encryption";
 import { syncTranscriptionToNotion } from "@/lib/notion/sync";
+import { createPlaudClient } from "@/lib/plaud/client";
 import { createUserStorageProvider } from "@/lib/storage/factory";
 
 export async function POST(
@@ -74,7 +75,31 @@ export async function POST(
 
         // Get storage provider and download audio
         const storage = await createUserStorageProvider(session.user.id);
-        const audioBuffer = await storage.downloadFile(recording.storagePath);
+        let audioBuffer: Buffer;
+        try {
+            audioBuffer = await storage.downloadFile(recording.storagePath);
+        } catch {
+            // File may have been cleaned up or lost on redeploy — re-download from Plaud
+            const [connection] = await db
+                .select()
+                .from(plaudConnections)
+                .where(eq(plaudConnections.userId, session.user.id))
+                .limit(1);
+            if (!connection) {
+                return NextResponse.json(
+                    { error: "Audio file missing and no Plaud connection to re-download" },
+                    { status: 400 },
+                );
+            }
+            const plaudClient = await createPlaudClient(
+                connection.bearerToken,
+                connection.apiBase,
+            );
+            audioBuffer = await plaudClient.downloadRecording(
+                recording.plaudFileId,
+                false,
+            );
+        }
 
         // Create a File object for the transcription API
         // Determine content type from storage path
