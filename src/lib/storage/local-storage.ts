@@ -29,7 +29,7 @@ export class LocalStorage implements StorageProvider {
      * Validate that the key doesn't contain path traversal attacks
      * and get the safe full file path
      */
-    private getFilePath(key: string): string {
+    getFilePath(key: string): string {
         const normalizedKey = key.replace(/\\/g, "/");
 
         if (

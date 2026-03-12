@@ -93,9 +93,7 @@ export async function transcribeRecording(
         const audioFile = new File(
             [new Uint8Array(audioBuffer)],
             recording.filename,
-            {
-                type: contentType,
-            },
+            { type: contentType },
         );
 
         const model = credentials.defaultModel || "whisper-1";
