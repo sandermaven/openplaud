@@ -25,7 +25,7 @@ const LANGUAGES = [
 ];
 
 interface NotionConfig {
-    id: string;
+    id?: string;
     databaseId: string;
     enabled: boolean;
     autoSave: boolean;
@@ -34,6 +34,7 @@ interface NotionConfig {
     includeSummary: boolean;
     language: string;
     maskedToken: string;
+    source?: "db" | "env";
 }
 
 export function NotionSection() {
@@ -287,6 +288,12 @@ export function NotionSection() {
                 <BookOpen className="w-5 h-5" />
                 Notion Integration
             </h2>
+
+            {config?.source === "env" && (
+                <p className="text-xs text-muted-foreground bg-muted px-3 py-2 rounded-md">
+                    Using environment variables (NOTION_TOKEN, NOTION_DATABASE_ID). Save via the UI to override.
+                </p>
+            )}
 
             <div className="space-y-4">
                 {/* Integration Token */}

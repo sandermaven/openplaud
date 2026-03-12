@@ -3,7 +3,8 @@ import { NextResponse } from "next/server";
 import { db } from "@/db";
 import { notionConfig } from "@/db/schema";
 import { auth } from "@/lib/auth";
-import { decrypt, encrypt } from "@/lib/encryption";
+import { encrypt } from "@/lib/encryption";
+import { getNotionConfig } from "@/lib/notion/config";
 
 // GET - Return notion config (token masked)
 export async function GET(request: Request) {
@@ -19,40 +20,29 @@ export async function GET(request: Request) {
             );
         }
 
-        const [config] = await db
-            .select()
-            .from(notionConfig)
-            .where(eq(notionConfig.userId, session.user.id))
-            .limit(1);
+        const resolved = await getNotionConfig(session.user.id);
 
-        if (!config) {
+        if (!resolved) {
             return NextResponse.json({ config: null });
         }
 
         // Mask the token - show only last 4 chars
         let maskedToken = "••••••••";
-        try {
-            const decrypted = decrypt(config.encryptedToken);
-            if (decrypted.length >= 4) {
-                maskedToken = `••••••••${decrypted.slice(-4)}`;
-            }
-        } catch {
-            // If decryption fails, just use the default mask
+        if (resolved.token.length >= 4) {
+            maskedToken = `••••••••${resolved.token.slice(-4)}`;
         }
 
         return NextResponse.json({
             config: {
-                id: config.id,
-                databaseId: config.databaseId,
-                enabled: config.enabled,
-                autoSave: config.autoSave,
-                defaultTags: config.defaultTags,
-                includeActionItems: config.includeActionItems,
-                includeSummary: config.includeSummary,
-                language: config.language,
+                databaseId: resolved.databaseId,
+                enabled: resolved.enabled,
+                autoSave: resolved.autoSave,
+                defaultTags: resolved.defaultTags,
+                includeActionItems: resolved.includeActionItems,
+                includeSummary: resolved.includeSummary,
+                language: resolved.language,
                 maskedToken,
-                createdAt: config.createdAt,
-                updatedAt: config.updatedAt,
+                source: resolved.source,
             },
         });
     } catch (error) {
