@@ -275,6 +275,7 @@ export const notionConfig = pgTable("notion_config", {
     includeActionItems: boolean("include_action_items").notNull().default(true),
     includeSummary: boolean("include_summary").notNull().default(true),
     language: text("language").notNull().default("nl"),
+    summaryPrompt: text("summary_prompt"),
     createdAt: timestamp("created_at").notNull().defaultNow(),
     updatedAt: timestamp("updated_at").notNull().defaultNow(),
 });

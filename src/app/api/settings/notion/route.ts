@@ -41,6 +41,7 @@ export async function GET(request: Request) {
                 includeActionItems: resolved.includeActionItems,
                 includeSummary: resolved.includeSummary,
                 language: resolved.language,
+                summaryPrompt: resolved.summaryPrompt,
                 maskedToken,
                 source: resolved.source,
             },
@@ -78,6 +79,7 @@ export async function PUT(request: Request) {
             includeActionItems,
             includeSummary,
             language,
+            summaryPrompt,
         } = body;
 
         // Check if config exists
@@ -103,6 +105,7 @@ export async function PUT(request: Request) {
             if (includeSummary !== undefined)
                 updates.includeSummary = includeSummary;
             if (language !== undefined) updates.language = language;
+            if (summaryPrompt !== undefined) updates.summaryPrompt = summaryPrompt;
 
             await db
                 .update(notionConfig)
@@ -130,6 +133,7 @@ export async function PUT(request: Request) {
             includeActionItems: includeActionItems ?? true,
             includeSummary: includeSummary ?? true,
             language: language ?? "nl",
+            summaryPrompt: summaryPrompt ?? null,
         });
 
         return NextResponse.json({ success: true });

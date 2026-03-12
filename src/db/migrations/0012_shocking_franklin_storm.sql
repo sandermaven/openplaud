@@ -1,0 +1,1 @@
+ALTER TABLE "notion_config" ADD COLUMN "summary_prompt" text;

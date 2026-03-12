@@ -5,6 +5,7 @@ import {
     recordings,
     transcriptions,
 } from "@/db/schema";
+import { generateSummaryFromTranscription } from "@/lib/ai/generate-summary";
 import { env } from "@/lib/env";
 import { notifyCalWebhook } from "@/lib/notion/cal-notify";
 import { buildNotionPageContent } from "./blocks";
@@ -15,6 +16,65 @@ const RATE_LIMIT_DELAY = 350; // ms between API calls (3 req/s limit)
 
 function delay(ms: number): Promise<void> {
     return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+/**
+ * Desired metadata properties and their Notion types.
+ * These will be auto-created on the database if missing.
+ */
+const METADATA_PROPERTIES: Record<string, Record<string, unknown>> = {
+    Date: { date: {} },
+    Duration: { rich_text: {} },
+    Language: { select: {} },
+};
+
+/**
+ * Ensure the Notion database has the required metadata properties.
+ * Uses raw fetch with pinned API version (2022-06-28) because the SDK v5
+ * defaults to 2025-09-03 which removed `properties` from database endpoints.
+ */
+async function ensureDatabaseProperties(
+    token: string,
+    databaseId: string,
+): Promise<void> {
+    // Retrieve existing properties
+    const getRes = await fetch(
+        `https://api.notion.com/v1/databases/${databaseId}`,
+        {
+            headers: {
+                Authorization: `Bearer ${token}`,
+                "Notion-Version": "2022-06-28",
+            },
+        },
+    );
+
+    if (!getRes.ok) return; // non-critical — page creation will still work
+
+    const database = (await getRes.json()) as {
+        properties?: Record<string, unknown>;
+    };
+    const existing = database.properties
+        ? Object.keys(database.properties)
+        : [];
+
+    const missing: Record<string, Record<string, unknown>> = {};
+    for (const [name, schema] of Object.entries(METADATA_PROPERTIES)) {
+        if (!existing.includes(name)) {
+            missing[name] = schema;
+        }
+    }
+
+    if (Object.keys(missing).length === 0) return;
+
+    await fetch(`https://api.notion.com/v1/databases/${databaseId}`, {
+        method: "PATCH",
+        headers: {
+            Authorization: `Bearer ${token}`,
+            "Notion-Version": "2022-06-28",
+            "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ properties: missing }),
+    });
 }
 
 /**
@@ -94,7 +154,11 @@ export async function syncTranscriptionToNotion(
             },
         };
 
-        // Only set Tags if configured (property may not exist in database)
+        // Ensure metadata properties exist on the Notion database
+        await ensureDatabaseProperties(config.token, config.databaseId);
+        await delay(RATE_LIMIT_DELAY);
+
+        // Tags (may not exist — retry without if creation fails)
         if (config.defaultTags && config.defaultTags.length > 0) {
             properties.Tags = {
                 multi_select: config.defaultTags.map((tag: string) => ({
@@ -103,7 +167,37 @@ export async function syncTranscriptionToNotion(
             };
         }
 
-        // Create the page, retry without Tags if the property doesn't exist
+        // Date (recording start time)
+        properties.Date = {
+            date: {
+                start: recording.startTime.toISOString(),
+            },
+        };
+
+        // Duration (formatted as "mm:ss")
+        const durationMs = recording.duration;
+        const minutes = Math.floor(durationMs / 60000);
+        const seconds = Math.floor((durationMs % 60000) / 1000);
+        properties.Duration = {
+            rich_text: [
+                {
+                    type: "text",
+                    text: {
+                        content: `${minutes}:${seconds.toString().padStart(2, "0")}`,
+                    },
+                },
+            ],
+        };
+
+        // Language
+        const detectedLanguage = txn.detectedLanguage || config.language;
+        if (detectedLanguage) {
+            properties.Language = {
+                select: { name: detectedLanguage },
+            };
+        }
+
+        // Create page (retry without Tags if that property doesn't exist)
         let page;
         try {
             page = await client.pages.create({
@@ -123,6 +217,16 @@ export async function syncTranscriptionToNotion(
             }
         }
 
+        // Generate summary if configured and no existing enhancement summary
+        let summary: string | null = enhancement?.summary ?? null;
+        if (config.includeSummary && !summary && config.summaryPrompt) {
+            summary = await generateSummaryFromTranscription(
+                txn.userId,
+                txn.text,
+                config.summaryPrompt,
+            );
+        }
+
         // Build content blocks
         const actionItems =
             enhancement?.actionItems &&
@@ -133,9 +237,7 @@ export async function syncTranscriptionToNotion(
         const batches = buildNotionPageContent({
             title: recording.filename,
             transcriptionText: txn.text,
-            summary: config.includeSummary
-                ? (enhancement?.summary ?? null)
-                : null,
+            summary: config.includeSummary ? summary : null,
             actionItems: config.includeActionItems ? actionItems : null,
             recordingUrl,
             duration: recording.duration,
@@ -174,7 +276,7 @@ export async function syncTranscriptionToNotion(
         notifyCalWebhook({
             title: recording.filename,
             notionPageUrl: pageUrl ?? "",
-            summary: enhancement?.summary ?? undefined,
+            summary: summary ?? undefined,
             recordingDate: recording.startTime.toISOString(),
         });
     } catch (error) {

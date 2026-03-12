@@ -6,6 +6,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
+import { Textarea } from "@/components/ui/textarea";
 import {
     Select,
     SelectContent,
@@ -24,6 +25,15 @@ const LANGUAGES = [
     { value: "pt", label: "Portugu\u00eas" },
 ];
 
+const DEFAULT_SUMMARY_PROMPT = `Vat deze transcriptie samen in de volgende structuur:
+
+**Kern** (1-2 zinnen: waar ging het over?)
+**Beslissingen** (wat is er besloten?)
+**Actiepunten** (wie doet wat, eventueel met deadline)
+**Opvallend** (context, spanningen, open vragen — alleen als relevant)
+
+Wees bondig. Laat secties weg als ze leeg zijn.`;
+
 interface NotionConfig {
     id?: string;
     databaseId: string;
@@ -33,6 +43,7 @@ interface NotionConfig {
     includeActionItems: boolean;
     includeSummary: boolean;
     language: string;
+    summaryPrompt: string | null;
     maskedToken: string;
     source?: "db" | "env";
 }
@@ -69,6 +80,7 @@ export function NotionSection() {
     const [includeActionItems, setIncludeActionItems] = useState(true);
     const [includeSummary, setIncludeSummary] = useState(true);
     const [language, setLanguage] = useState("nl");
+    const [summaryPrompt, setSummaryPrompt] = useState(DEFAULT_SUMMARY_PROMPT);
     const [showToken, setShowToken] = useState(false);
     const [isSaving, setIsSaving] = useState(false);
     const [isVerifying, setIsVerifying] = useState(false);
@@ -101,6 +113,7 @@ export function NotionSection() {
                         setIncludeActionItems(data.config.includeActionItems);
                         setIncludeSummary(data.config.includeSummary);
                         setLanguage(data.config.language);
+                        setSummaryPrompt(data.config.summaryPrompt || DEFAULT_SUMMARY_PROMPT);
                     }
                 }
             } catch (err) {
@@ -202,6 +215,7 @@ export function NotionSection() {
                 includeActionItems,
                 includeSummary,
                 language,
+                summaryPrompt: summaryPrompt || null,
             };
 
             if (token) {
@@ -258,6 +272,7 @@ export function NotionSection() {
                 setDefaultTags("Knowledge");
                 setIncludeActionItems(true);
                 setIncludeSummary(true);
+                setSummaryPrompt(DEFAULT_SUMMARY_PROMPT);
                 setLanguage("nl");
                 setSaveMessage({
                     type: "success",
@@ -440,6 +455,27 @@ export function NotionSection() {
                         disabled={isSavingSettings}
                     />
                 </div>
+
+                {/* Summary Prompt */}
+                {includeSummary && (
+                    <div className="space-y-2 pl-1">
+                        <Label htmlFor="notion-summary-prompt">
+                            Samenvatting prompt
+                        </Label>
+                        <Textarea
+                            id="notion-summary-prompt"
+                            value={summaryPrompt}
+                            onChange={(e) => setSummaryPrompt(e.target.value)}
+                            placeholder={DEFAULT_SUMMARY_PROMPT}
+                            rows={8}
+                            className="font-mono text-xs"
+                        />
+                        <p className="text-xs text-muted-foreground">
+                            De prompt waarmee de AI een samenvatting genereert
+                            boven de transcriptie in Notion
+                        </p>
+                    </div>
+                )}
 
                 {/* Include Action Items */}
                 <div className="flex items-center justify-between">
