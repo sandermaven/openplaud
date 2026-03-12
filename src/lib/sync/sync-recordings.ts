@@ -1,6 +1,12 @@
-import { eq } from "drizzle-orm";
+import { and, eq, isNull, notInArray } from "drizzle-orm";
 import { db } from "@/db";
-import { plaudConnections, recordings, userSettings, users } from "@/db/schema";
+import {
+    plaudConnections,
+    recordings,
+    transcriptions,
+    userSettings,
+    users,
+} from "@/db/schema";
 import { env } from "@/lib/env";
 import { sendNewRecordingBarkNotification } from "@/lib/notifications/bark";
 import { sendNewRecordingEmail } from "@/lib/notifications/email";
@@ -357,17 +363,31 @@ export async function syncRecordingsForUser(
             }
         }
 
-        // Queue transcription for new recordings (runs after sync response)
-        if (
-            context.autoTranscribe &&
-            result.pendingTranscriptionIds.length > 0
-        ) {
-            // Run transcription in background, don't await
-            queueTranscriptions(userId, result.pendingTranscriptionIds).catch(
-                (error) => {
+        // Queue transcription for recordings without transcription
+        if (context.autoTranscribe) {
+            // Find all recordings that have no transcription yet
+            const transcribedRecordingIds = db
+                .select({ recordingId: transcriptions.recordingId })
+                .from(transcriptions)
+                .where(eq(transcriptions.userId, userId));
+
+            const untranscribed = await db
+                .select({ id: recordings.id })
+                .from(recordings)
+                .where(
+                    and(
+                        eq(recordings.userId, userId),
+                        notInArray(recordings.id, transcribedRecordingIds),
+                    ),
+                );
+
+            const allIds = untranscribed.map((r) => r.id);
+
+            if (allIds.length > 0) {
+                queueTranscriptions(userId, allIds).catch((error) => {
                     console.error("Background transcription failed:", error);
-                },
-            );
+                });
+            }
         }
 
         return result;
