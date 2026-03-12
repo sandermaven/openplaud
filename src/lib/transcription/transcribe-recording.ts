@@ -85,7 +85,31 @@ export async function transcribeRecording(
         });
 
         const storage = await createUserStorageProvider(userId);
-        const audioBuffer = await storage.downloadFile(recording.storagePath);
+        let audioBuffer: Buffer;
+        try {
+            audioBuffer = await storage.downloadFile(recording.storagePath);
+        } catch {
+            // File may have been cleaned up — re-download from Plaud
+            const [connection] = await db
+                .select()
+                .from(plaudConnections)
+                .where(eq(plaudConnections.userId, userId))
+                .limit(1);
+            if (!connection) {
+                return {
+                    success: false,
+                    error: "No Plaud connection to re-download audio",
+                };
+            }
+            const plaudClient = await createPlaudClient(
+                connection.bearerToken,
+                connection.apiBase,
+            );
+            audioBuffer = await plaudClient.downloadRecording(
+                recording.plaudFileId,
+                false,
+            );
+        }
 
         const contentType = recording.storagePath.endsWith(".mp3")
             ? "audio/mpeg"
@@ -203,6 +227,13 @@ export async function transcribeRecording(
             } catch (error) {
                 console.error("Failed to generate title:", error);
             }
+        }
+
+        // Clean up local audio file after successful transcription
+        try {
+            await storage.deleteFile(recording.storagePath);
+        } catch (error) {
+            console.error("Failed to delete audio after transcription:", error);
         }
 
         // Notion auto-sync (non-blocking)
