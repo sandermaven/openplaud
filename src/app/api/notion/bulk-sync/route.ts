@@ -69,10 +69,18 @@ export async function POST(request: Request) {
         let failed = 0;
 
         for (const txn of pendingTranscriptions) {
-            try {
-                await syncTranscriptionToNotion(txn.id);
+            await syncTranscriptionToNotion(txn.id);
+
+            // Check actual status after sync (syncTranscriptionToNotion catches errors internally)
+            const [result] = await db
+                .select({ status: transcriptions.notionSyncStatus })
+                .from(transcriptions)
+                .where(eq(transcriptions.id, txn.id))
+                .limit(1);
+
+            if (result?.status === "synced") {
                 synced++;
-            } catch {
+            } else {
                 failed++;
             }
             await delay(BULK_SYNC_DELAY);

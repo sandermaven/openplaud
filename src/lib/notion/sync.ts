@@ -107,11 +107,25 @@ export async function syncTranscriptionToNotion(
             };
         }
 
-        // Create the page
-        const page = await client.pages.create({
-            parent: { database_id: config.databaseId },
-            properties: properties as Parameters<typeof client.pages.create>[0]["properties"],
-        });
+        // Create the page, retry without Tags if the property doesn't exist
+        let page;
+        try {
+            page = await client.pages.create({
+                parent: { database_id: config.databaseId },
+                properties: properties as Parameters<typeof client.pages.create>[0]["properties"],
+            });
+        } catch (createError) {
+            const msg = createError instanceof Error ? createError.message : "";
+            if (properties.Tags && msg.includes("Tags")) {
+                delete properties.Tags;
+                page = await client.pages.create({
+                    parent: { database_id: config.databaseId },
+                    properties: properties as Parameters<typeof client.pages.create>[0]["properties"],
+                });
+            } else {
+                throw createError;
+            }
+        }
 
         // Build content blocks
         const actionItems =
