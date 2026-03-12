@@ -13,6 +13,7 @@ export interface ResolvedNotionConfig {
     includeActionItems: boolean;
     includeSummary: boolean;
     language: string;
+    summaryPrompt: string | null;
     /** "db" when loaded from database, "env" when using environment variable fallback */
     source: "db" | "env";
 }
@@ -43,6 +44,7 @@ export async function getNotionConfig(
                 includeActionItems: config.includeActionItems,
                 includeSummary: config.includeSummary,
                 language: config.language,
+                summaryPrompt: config.summaryPrompt,
                 source: "db",
             };
         } catch {
@@ -64,6 +66,7 @@ export async function getNotionConfig(
             includeActionItems: true,
             includeSummary: true,
             language: "nl",
+            summaryPrompt: null,
             source: "env",
         };
     }
