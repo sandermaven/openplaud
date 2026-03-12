@@ -2,9 +2,10 @@ import { and, eq } from "drizzle-orm";
 import { NextResponse } from "next/server";
 import { OpenAI } from "openai";
 import { db } from "@/db";
-import { apiCredentials, recordings, transcriptions } from "@/db/schema";
+import { apiCredentials, notionConfig, recordings, transcriptions } from "@/db/schema";
 import { auth } from "@/lib/auth";
 import { decrypt } from "@/lib/encryption";
+import { syncTranscriptionToNotion } from "@/lib/notion/sync";
 import { createUserStorageProvider } from "@/lib/storage/factory";
 
 export async function POST(
@@ -139,6 +140,37 @@ export async function POST(
                 provider: credentials.provider,
                 model: credentials.defaultModel || "whisper-1",
             });
+        }
+
+        // Notion auto-sync (non-blocking)
+        try {
+            const [notionCfg] = await db
+                .select()
+                .from(notionConfig)
+                .where(
+                    and(
+                        eq(notionConfig.userId, session.user.id),
+                        eq(notionConfig.enabled, true),
+                        eq(notionConfig.autoSave, true),
+                    ),
+                )
+                .limit(1);
+
+            if (notionCfg) {
+                const [txn] = await db
+                    .select({ id: transcriptions.id })
+                    .from(transcriptions)
+                    .where(eq(transcriptions.recordingId, id))
+                    .limit(1);
+
+                if (txn) {
+                    syncTranscriptionToNotion(txn.id).catch((err) =>
+                        console.error("Notion auto-sync failed:", err),
+                    );
+                }
+            }
+        } catch (error) {
+            console.error("Notion config check failed:", error);
         }
 
         return NextResponse.json({
