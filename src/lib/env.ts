@@ -50,6 +50,10 @@ const envSchema = z.object({
                     'SMTP_FROM must be an email address (e.g., "user@example.com") or formatted as "Name <user@example.com>"',
             },
         ),
+
+    // Notion integration (optional env-var fallback so config survives redeploys)
+    NOTION_TOKEN: z.string().optional(),
+    NOTION_DATABASE_ID: z.string().optional(),
 });
 
 export type Env = z.infer<typeof envSchema>;
@@ -83,6 +87,8 @@ function validateEnv(): Env {
             SMTP_FROM: process.env.SMTP_FROM,
             CAL_WEBHOOK_URL: process.env.CAL_WEBHOOK_URL,
             CAL_WEBHOOK_SECRET: process.env.CAL_WEBHOOK_SECRET,
+            NOTION_TOKEN: process.env.NOTION_TOKEN,
+            NOTION_DATABASE_ID: process.env.NOTION_DATABASE_ID,
         });
 
         // In runtime (dev/prod servers), we require a strong encryption key.

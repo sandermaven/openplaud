@@ -2,14 +2,14 @@ import { eq } from "drizzle-orm";
 import { db } from "@/db";
 import {
     aiEnhancements,
-    notionConfig,
     recordings,
     transcriptions,
 } from "@/db/schema";
 import { env } from "@/lib/env";
 import { notifyCalWebhook } from "@/lib/notion/cal-notify";
 import { buildNotionPageContent } from "./blocks";
-import { createNotionClient } from "./client";
+import { createNotionClientFromToken } from "./client";
+import { getNotionConfig } from "./config";
 
 const RATE_LIMIT_DELAY = 350; // ms between API calls (3 req/s limit)
 
@@ -55,12 +55,8 @@ export async function syncTranscriptionToNotion(
             .where(eq(aiEnhancements.recordingId, txn.recordingId))
             .limit(1);
 
-        // Fetch notion config
-        const [config] = await db
-            .select()
-            .from(notionConfig)
-            .where(eq(notionConfig.userId, txn.userId))
-            .limit(1);
+        // Fetch notion config (DB first, then env var fallback)
+        const config = await getNotionConfig(txn.userId);
 
         if (!config || !config.enabled) {
             return;
@@ -72,7 +68,7 @@ export async function syncTranscriptionToNotion(
             .set({ notionSyncStatus: "syncing" })
             .where(eq(transcriptions.id, transcriptionId));
 
-        const client = createNotionClient(config.encryptedToken);
+        const client = createNotionClientFromToken(config.token);
 
         const appUrl = env.APP_URL || "http://localhost:3000";
         const recordingUrl = `${appUrl}/recordings/${recording.id}`;

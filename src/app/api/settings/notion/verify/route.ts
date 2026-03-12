@@ -1,9 +1,6 @@
-import { eq } from "drizzle-orm";
 import { NextResponse } from "next/server";
-import { db } from "@/db";
-import { notionConfig } from "@/db/schema";
 import { auth } from "@/lib/auth";
-import { decrypt } from "@/lib/encryption";
+import { getNotionConfig } from "@/lib/notion/config";
 import { verifyNotionConnection } from "@/lib/notion/verify";
 
 // POST - Verify Notion connection
@@ -25,16 +22,11 @@ export async function POST(request: Request) {
         let resolvedToken = token;
         let resolvedDatabaseId = databaseId;
 
-        // If no token provided, try to use the saved one
+        // If no token provided, try to use the saved config (DB → env fallback)
         if (!resolvedToken && useSaved) {
-            const [config] = await db
-                .select()
-                .from(notionConfig)
-                .where(eq(notionConfig.userId, session.user.id))
-                .limit(1);
-
+            const config = await getNotionConfig(session.user.id);
             if (config) {
-                resolvedToken = decrypt(config.encryptedToken);
+                resolvedToken = config.token;
                 if (!resolvedDatabaseId) {
                     resolvedDatabaseId = config.databaseId;
                 }

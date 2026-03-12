@@ -1,8 +1,9 @@
 import { and, eq, inArray } from "drizzle-orm";
 import { NextResponse } from "next/server";
 import { db } from "@/db";
-import { notionConfig, transcriptions } from "@/db/schema";
+import { transcriptions } from "@/db/schema";
 import { auth } from "@/lib/auth";
+import { getNotionConfig } from "@/lib/notion/config";
 import { syncTranscriptionToNotion } from "@/lib/notion/sync";
 
 const BULK_SYNC_DELAY = 500; // ms between syncs
@@ -25,12 +26,8 @@ export async function POST(request: Request) {
             );
         }
 
-        // Check notion config
-        const [config] = await db
-            .select()
-            .from(notionConfig)
-            .where(eq(notionConfig.userId, session.user.id))
-            .limit(1);
+        // Check notion config (DB → env var fallback)
+        const config = await getNotionConfig(session.user.id);
 
         if (!config || !config.enabled) {
             return NextResponse.json(

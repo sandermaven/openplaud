@@ -2,9 +2,10 @@ import { and, eq } from "drizzle-orm";
 import { NextResponse } from "next/server";
 import { OpenAI } from "openai";
 import { db } from "@/db";
-import { apiCredentials, notionConfig, plaudConnections, recordings, transcriptions } from "@/db/schema";
+import { apiCredentials, plaudConnections, recordings, transcriptions } from "@/db/schema";
 import { auth } from "@/lib/auth";
 import { decrypt } from "@/lib/encryption";
+import { getNotionConfig } from "@/lib/notion/config";
 import { syncTranscriptionToNotion } from "@/lib/notion/sync";
 import { createPlaudClient } from "@/lib/plaud/client";
 import { createUserStorageProvider } from "@/lib/storage/factory";
@@ -169,19 +170,9 @@ export async function POST(
 
         // Notion auto-sync (non-blocking)
         try {
-            const [notionCfg] = await db
-                .select()
-                .from(notionConfig)
-                .where(
-                    and(
-                        eq(notionConfig.userId, session.user.id),
-                        eq(notionConfig.enabled, true),
-                        eq(notionConfig.autoSave, true),
-                    ),
-                )
-                .limit(1);
+            const notionCfg = await getNotionConfig(session.user.id);
 
-            if (notionCfg) {
+            if (notionCfg && notionCfg.enabled && notionCfg.autoSave) {
                 const [txn] = await db
                     .select({ id: transcriptions.id })
                     .from(transcriptions)

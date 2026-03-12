@@ -7,7 +7,6 @@ import type {
 import { db } from "@/db";
 import {
     apiCredentials,
-    notionConfig,
     plaudConnections,
     recordings,
     transcriptions,
@@ -15,6 +14,7 @@ import {
 } from "@/db/schema";
 import { generateTitleFromTranscription } from "@/lib/ai/generate-title";
 import { decrypt } from "@/lib/encryption";
+import { getNotionConfig } from "@/lib/notion/config";
 import { syncTranscriptionToNotion } from "@/lib/notion/sync";
 import { createPlaudClient } from "@/lib/plaud/client";
 import { createUserStorageProvider } from "@/lib/storage/factory";
@@ -238,19 +238,9 @@ export async function transcribeRecording(
 
         // Notion auto-sync (non-blocking)
         try {
-            const [notionCfg] = await db
-                .select()
-                .from(notionConfig)
-                .where(
-                    and(
-                        eq(notionConfig.userId, userId),
-                        eq(notionConfig.enabled, true),
-                        eq(notionConfig.autoSave, true),
-                    ),
-                )
-                .limit(1);
+            const notionCfg = await getNotionConfig(userId);
 
-            if (notionCfg) {
+            if (notionCfg && notionCfg.enabled && notionCfg.autoSave) {
                 const [txn] = await db
                     .select({ id: transcriptions.id })
                     .from(transcriptions)

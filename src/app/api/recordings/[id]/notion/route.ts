@@ -1,8 +1,9 @@
 import { and, eq } from "drizzle-orm";
 import { NextResponse } from "next/server";
 import { db } from "@/db";
-import { notionConfig, recordings, transcriptions } from "@/db/schema";
+import { recordings, transcriptions } from "@/db/schema";
 import { auth } from "@/lib/auth";
+import { getNotionConfig } from "@/lib/notion/config";
 import { syncTranscriptionToNotion } from "@/lib/notion/sync";
 
 interface RouteContext {
@@ -109,12 +110,8 @@ export async function POST(request: Request, context: RouteContext) {
             );
         }
 
-        // Check notion config exists
-        const [config] = await db
-            .select()
-            .from(notionConfig)
-            .where(eq(notionConfig.userId, session.user.id))
-            .limit(1);
+        // Check notion config exists (DB → env var fallback)
+        const config = await getNotionConfig(session.user.id);
 
         if (!config) {
             return NextResponse.json(
