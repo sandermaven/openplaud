@@ -1,4 +1,4 @@
-import { and, eq, isNull, notInArray } from "drizzle-orm";
+import { and, eq, notInArray } from "drizzle-orm";
 import { db } from "@/db";
 import {
     plaudConnections,
@@ -12,7 +12,6 @@ import { sendNewRecordingBarkNotification } from "@/lib/notifications/bark";
 import { sendNewRecordingEmail } from "@/lib/notifications/email";
 import { createPlaudClient } from "@/lib/plaud/client";
 import { createUserStorageProvider } from "@/lib/storage/factory";
-import { transcribeRecording } from "@/lib/transcription/transcribe-recording";
 import type { PlaudRecording } from "@/types/plaud";
 
 /**
@@ -363,9 +362,8 @@ export async function syncRecordingsForUser(
             }
         }
 
-        // Queue transcription for recordings without transcription
+        // Collect IDs of recordings that need transcription
         if (context.autoTranscribe) {
-            // Find all recordings that have no transcription yet
             const transcribedRecordingIds = db
                 .select({ recordingId: transcriptions.recordingId })
                 .from(transcriptions)
@@ -381,13 +379,7 @@ export async function syncRecordingsForUser(
                     ),
                 );
 
-            const allIds = untranscribed.map((r) => r.id);
-
-            if (allIds.length > 0) {
-                queueTranscriptions(userId, allIds).catch((error) => {
-                    console.error("Background transcription failed:", error);
-                });
-            }
+            result.pendingTranscriptionIds = untranscribed.map((r) => r.id);
         }
 
         return result;
@@ -396,25 +388,5 @@ export async function syncRecordingsForUser(
             error instanceof Error ? error.message : String(error);
         result.errors.push(`Sync failed: ${errorMessage}`);
         return result;
-    }
-}
-
-/**
- * Queue transcriptions to run in background
- * This is fire-and-forget to not block the sync response
- */
-async function queueTranscriptions(
-    userId: string,
-    recordingIds: string[],
-): Promise<void> {
-    for (const recordingId of recordingIds) {
-        try {
-            await transcribeRecording(userId, recordingId);
-        } catch (error) {
-            console.error(
-                `Auto-transcription failed for recording ${recordingId}:`,
-                error,
-            );
-        }
     }
 }
