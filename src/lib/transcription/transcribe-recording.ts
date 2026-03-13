@@ -14,7 +14,6 @@ import {
 } from "@/db/schema";
 import { generateTitleFromTranscription } from "@/lib/ai/generate-title";
 import { decrypt } from "@/lib/encryption";
-import { getNotionConfig } from "@/lib/notion/config";
 import { syncTranscriptionToNotion } from "@/lib/notion/sync";
 import { createPlaudClient } from "@/lib/plaud/client";
 import { createUserStorageProvider } from "@/lib/storage/factory";
@@ -236,25 +235,21 @@ export async function transcribeRecording(
             console.error("Failed to delete audio after transcription:", error);
         }
 
-        // Notion auto-sync (non-blocking)
+        // Auto-sync to Scribe (non-blocking)
         try {
-            const notionCfg = await getNotionConfig(userId);
+            const [txn] = await db
+                .select({ id: transcriptions.id })
+                .from(transcriptions)
+                .where(eq(transcriptions.recordingId, recordingId))
+                .limit(1);
 
-            if (notionCfg && notionCfg.enabled && notionCfg.autoSave) {
-                const [txn] = await db
-                    .select({ id: transcriptions.id })
-                    .from(transcriptions)
-                    .where(eq(transcriptions.recordingId, recordingId))
-                    .limit(1);
-
-                if (txn) {
-                    syncTranscriptionToNotion(txn.id).catch((err) =>
-                        console.error("Notion auto-sync failed:", err),
-                    );
-                }
+            if (txn) {
+                syncTranscriptionToNotion(txn.id).catch((err) =>
+                    console.error("Scribe auto-sync failed:", err),
+                );
             }
         } catch (error) {
-            console.error("Notion config check failed:", error);
+            console.error("Scribe sync trigger failed:", error);
         }
 
         return { success: true };

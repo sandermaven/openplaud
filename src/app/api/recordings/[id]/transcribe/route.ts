@@ -5,7 +5,6 @@ import { db } from "@/db";
 import { apiCredentials, plaudConnections, recordings, transcriptions } from "@/db/schema";
 import { auth } from "@/lib/auth";
 import { decrypt } from "@/lib/encryption";
-import { getNotionConfig } from "@/lib/notion/config";
 import { syncTranscriptionToNotion } from "@/lib/notion/sync";
 import { createPlaudClient } from "@/lib/plaud/client";
 import { createUserStorageProvider } from "@/lib/storage/factory";
@@ -168,25 +167,21 @@ export async function POST(
             });
         }
 
-        // Notion auto-sync (non-blocking)
+        // Auto-sync to Scribe (non-blocking)
         try {
-            const notionCfg = await getNotionConfig(session.user.id);
+            const [txn] = await db
+                .select({ id: transcriptions.id })
+                .from(transcriptions)
+                .where(eq(transcriptions.recordingId, id))
+                .limit(1);
 
-            if (notionCfg && notionCfg.enabled && notionCfg.autoSave) {
-                const [txn] = await db
-                    .select({ id: transcriptions.id })
-                    .from(transcriptions)
-                    .where(eq(transcriptions.recordingId, id))
-                    .limit(1);
-
-                if (txn) {
-                    syncTranscriptionToNotion(txn.id).catch((err) =>
-                        console.error("Notion auto-sync failed:", err),
-                    );
-                }
+            if (txn) {
+                syncTranscriptionToNotion(txn.id).catch((err) =>
+                    console.error("Scribe auto-sync failed:", err),
+                );
             }
         } catch (error) {
-            console.error("Notion config check failed:", error);
+            console.error("Scribe sync trigger failed:", error);
         }
 
         return NextResponse.json({
