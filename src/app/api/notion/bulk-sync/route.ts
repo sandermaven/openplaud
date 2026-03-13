@@ -3,7 +3,7 @@ import { NextResponse } from "next/server";
 import { db } from "@/db";
 import { transcriptions } from "@/db/schema";
 import { auth } from "@/lib/auth";
-import { getNotionConfig } from "@/lib/notion/config";
+import { env } from "@/lib/env";
 import { syncTranscriptionToNotion } from "@/lib/notion/sync";
 
 const BULK_SYNC_DELAY = 500; // ms between syncs
@@ -12,7 +12,7 @@ function delay(ms: number): Promise<void> {
     return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-// POST - Bulk sync all pending/failed transcriptions to Notion
+// POST - Bulk sync all pending/failed transcriptions to Scribe
 export async function POST(request: Request) {
     try {
         const session = await auth.api.getSession({
@@ -26,12 +26,9 @@ export async function POST(request: Request) {
             );
         }
 
-        // Check notion config (DB → env var fallback)
-        const config = await getNotionConfig(session.user.id);
-
-        if (!config || !config.enabled) {
+        if (!env.SCRIBE_WEBHOOK_SECRET) {
             return NextResponse.json(
-                { error: "Notion is not configured or disabled" },
+                { error: "Scribe webhook is not configured" },
                 { status: 400 },
             );
         }

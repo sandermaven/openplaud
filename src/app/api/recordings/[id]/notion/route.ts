@@ -3,7 +3,7 @@ import { NextResponse } from "next/server";
 import { db } from "@/db";
 import { recordings, transcriptions } from "@/db/schema";
 import { auth } from "@/lib/auth";
-import { getNotionConfig } from "@/lib/notion/config";
+import { env } from "@/lib/env";
 import { syncTranscriptionToNotion } from "@/lib/notion/sync";
 
 interface RouteContext {
@@ -110,12 +110,9 @@ export async function POST(request: Request, context: RouteContext) {
             );
         }
 
-        // Check notion config exists (DB → env var fallback)
-        const config = await getNotionConfig(session.user.id);
-
-        if (!config) {
+        if (!env.SCRIBE_WEBHOOK_SECRET) {
             return NextResponse.json(
-                { error: "Notion is not configured" },
+                { error: "Scribe webhook is not configured" },
                 { status: 400 },
             );
         }
