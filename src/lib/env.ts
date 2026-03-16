@@ -35,6 +35,7 @@ const envSchema = z.object({
     CAL_WEBHOOK_URL: z.string().url().optional(),
     CAL_WEBHOOK_SECRET: z.string().optional(),
     SCRIBE_WEBHOOK_SECRET: z.string().optional(),
+    CRON_SECRET: z.string().optional(),
 
     SMTP_FROM: z
         .string()
@@ -89,6 +90,7 @@ function validateEnv(): Env {
             CAL_WEBHOOK_URL: process.env.CAL_WEBHOOK_URL,
             CAL_WEBHOOK_SECRET: process.env.CAL_WEBHOOK_SECRET,
             SCRIBE_WEBHOOK_SECRET: process.env.SCRIBE_WEBHOOK_SECRET,
+            CRON_SECRET: process.env.CRON_SECRET,
             NOTION_TOKEN: process.env.NOTION_TOKEN,
             NOTION_DATABASE_ID: process.env.NOTION_DATABASE_ID,
         });
