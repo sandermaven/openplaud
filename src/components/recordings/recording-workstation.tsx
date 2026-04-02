@@ -23,6 +23,7 @@ interface Transcription {
     text?: string;
     detectedLanguage?: string;
     transcriptionType?: string;
+    costEstimate?: number;
 }
 
 interface RecordingWorkstationProps {

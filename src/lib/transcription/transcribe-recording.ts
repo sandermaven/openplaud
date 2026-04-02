@@ -17,6 +17,7 @@ import { decrypt } from "@/lib/encryption";
 import { syncTranscriptionToNotion } from "@/lib/notion/sync";
 import { createPlaudClient } from "@/lib/plaud/client";
 import { createUserStorageProvider } from "@/lib/storage/factory";
+import { estimateTranscriptionCost } from "@/lib/transcription/pricing";
 
 export async function transcribeRecording(
     userId: string,
@@ -158,6 +159,12 @@ export async function transcribeRecording(
                     : (transcription.text ?? "");
         }
 
+        const costEstimate = estimateTranscriptionCost(
+            credentials.provider,
+            model,
+            recording.duration,
+        );
+
         if (existingTranscription) {
             await db
                 .update(transcriptions)
@@ -167,6 +174,7 @@ export async function transcribeRecording(
                     transcriptionType: "server",
                     provider: credentials.provider,
                     model: credentials.defaultModel || "whisper-1",
+                    costEstimate,
                 })
                 .where(eq(transcriptions.id, existingTranscription.id));
         } else {
@@ -178,6 +186,7 @@ export async function transcribeRecording(
                 transcriptionType: "server",
                 provider: credentials.provider,
                 model: credentials.defaultModel || "whisper-1",
+                costEstimate,
             });
         }
 

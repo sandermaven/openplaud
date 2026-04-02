@@ -1,6 +1,6 @@
 "use client";
 
-import { FileText, Languages, Sparkles } from "lucide-react";
+import { DollarSign, FileText, Languages, Sparkles } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import type { Recording } from "@/types/recording";
@@ -8,6 +8,7 @@ import type { Recording } from "@/types/recording";
 interface Transcription {
     text?: string;
     language?: string;
+    costEstimate?: number;
 }
 
 interface TranscriptionPanelProps {
@@ -80,6 +81,16 @@ export function TranscriptionPanel({
                                 {transcription.text.split(/\s+/).length} words
                             </div>
                             <div>{transcription.text.length} characters</div>
+                            {transcription.costEstimate !== undefined && (
+                                <div className="flex items-center gap-1">
+                                    <DollarSign className="w-3 h-3" />
+                                    <span>
+                                        Cost: {transcription.costEstimate === 0
+                                            ? "Free"
+                                            : `$${transcription.costEstimate.toFixed(4)}`}
+                                    </span>
+                                </div>
+                            )}
                         </div>
                     </div>
                 ) : (

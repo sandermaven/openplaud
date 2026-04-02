@@ -27,6 +27,7 @@ export default async function DashboardPage() {
             text: transcriptions.text,
             language: transcriptions.detectedLanguage,
             notionSyncStatus: transcriptions.notionSyncStatus,
+            costEstimate: transcriptions.costEstimate,
         })
         .from(transcriptions)
         .where(eq(transcriptions.userId, session.user.id));
@@ -36,7 +37,11 @@ export default async function DashboardPage() {
     const transcriptionMap = new Map(
         userTranscriptions.map((t) => [
             t.recordingId,
-            { text: t.text, language: t.language || undefined },
+            {
+                text: t.text,
+                language: t.language || undefined,
+                costEstimate: t.costEstimate ?? undefined,
+            },
         ]),
     );
 

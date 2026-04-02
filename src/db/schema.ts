@@ -185,6 +185,8 @@ export const transcriptions = pgTable(
         notionSyncStatus: text("notion_sync_status").default("pending"), // 'pending' | 'syncing' | 'synced' | 'failed' | 'disabled'
         notionSyncError: text("notion_sync_error"),
         notionSyncedAt: timestamp("notion_synced_at"),
+        // Estimated cost in USD based on audio duration and model pricing
+        costEstimate: real("cost_estimate"),
         createdAt: timestamp("created_at").notNull().defaultNow(),
     },
     (table) => ({
