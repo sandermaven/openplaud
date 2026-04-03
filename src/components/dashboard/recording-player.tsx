@@ -111,7 +111,26 @@ export function RecordingPlayer({ recording, onEnded }: RecordingPlayerProps) {
             setIsPlaying(false);
             const err = audio.error;
             console.error("Audio load error:", err?.code, err?.message);
-            toast.error("Failed to load audio");
+            // Fetch the audio URL to get the server error message
+            fetch(`/api/recordings/${recording.id}/audio`, { method: "HEAD" })
+                .then((res) => {
+                    if (!res.ok) {
+                        return fetch(
+                            `/api/recordings/${recording.id}/audio`,
+                        ).then((r) => r.json());
+                    }
+                    return null;
+                })
+                .then((data) => {
+                    if (data?.error) {
+                        toast.error(data.error);
+                    } else {
+                        toast.error("Failed to load audio");
+                    }
+                })
+                .catch(() => {
+                    toast.error("Failed to load audio");
+                });
         };
 
         audio.addEventListener("timeupdate", updateTime);

@@ -160,61 +160,115 @@ export async function GET(
                 .where(eq(plaudConnections.userId, session.user.id))
                 .limit(1);
 
-            if (connection) {
-                const plaudClient = await createPlaudClient(
+            if (!connection) {
+                console.error(
+                    `Audio ${id}: no Plaud connection found for user ${session.user.id}`,
+                );
+                return NextResponse.json(
+                    {
+                        error: "No Plaud connection found. Please reconnect your Plaud account.",
+                    },
+                    { status: 404 },
+                );
+            }
+
+            let plaudClient;
+            try {
+                plaudClient = await createPlaudClient(
                     connection.bearerToken,
                     connection.apiBase,
                 );
-                const tempUrlResponse = await plaudClient.getTempUrl(
+            } catch (decryptError) {
+                console.error(
+                    `Audio ${id}: failed to create Plaud client:`,
+                    decryptError,
+                );
+                return NextResponse.json(
+                    {
+                        error: "Failed to authenticate with Plaud. Please reconnect your account.",
+                    },
+                    { status: 502 },
+                );
+            }
+
+            let tempUrlResponse;
+            try {
+                tempUrlResponse = await plaudClient.getTempUrl(
                     recording.plaudFileId,
                     false,
                 );
-
-                // Proxy the audio stream instead of redirecting to avoid
-                // cross-origin issues with iOS Safari's audio element
-                const fetchHeaders: HeadersInit = {};
-                const rangeHeader = request.headers.get("range");
-                if (rangeHeader) {
-                    fetchHeaders["Range"] = rangeHeader;
-                }
-
-                const audioResponse = await fetch(tempUrlResponse.temp_url, {
-                    headers: fetchHeaders,
-                });
-
-                if (!audioResponse.ok && audioResponse.status !== 206) {
-                    return NextResponse.json(
-                        { error: "Failed to fetch audio from source" },
-                        { status: 502 },
-                    );
-                }
-
-                const contentType =
-                    audioResponse.headers.get("content-type") ||
-                    getContentType(recording.storagePath);
-                const responseHeaders: Record<string, string> = {
-                    "Content-Type": contentType,
-                    "Accept-Ranges": "bytes",
-                    "Cache-Control": "public, max-age=3600",
-                };
-
-                const contentLength =
-                    audioResponse.headers.get("content-length");
-                if (contentLength) {
-                    responseHeaders["Content-Length"] = contentLength;
-                }
-
-                const contentRange =
-                    audioResponse.headers.get("content-range");
-                if (contentRange) {
-                    responseHeaders["Content-Range"] = contentRange;
-                }
-
-                return new NextResponse(audioResponse.body, {
-                    status: audioResponse.status,
-                    headers: responseHeaders,
-                });
+            } catch (apiError) {
+                console.error(
+                    `Audio ${id}: Plaud getTempUrl failed for file ${recording.plaudFileId}:`,
+                    apiError,
+                );
+                return NextResponse.json(
+                    {
+                        error: "Plaud session expired. Please reconnect your Plaud account.",
+                    },
+                    { status: 502 },
+                );
             }
+
+            if (!tempUrlResponse?.temp_url) {
+                console.error(
+                    `Audio ${id}: Plaud returned empty temp_url for file ${recording.plaudFileId}`,
+                );
+                return NextResponse.json(
+                    { error: "Plaud returned no download URL for this file." },
+                    { status: 502 },
+                );
+            }
+
+            // Proxy the audio stream instead of redirecting to avoid
+            // cross-origin issues with iOS Safari's audio element
+            const fetchHeaders: HeadersInit = {};
+            const rangeHeader = request.headers.get("range");
+            if (rangeHeader) {
+                fetchHeaders["Range"] = rangeHeader;
+            }
+
+            const audioResponse = await fetch(tempUrlResponse.temp_url, {
+                headers: fetchHeaders,
+            });
+
+            if (!audioResponse.ok && audioResponse.status !== 206) {
+                console.error(
+                    `Audio ${id}: fetch from Plaud temp URL failed with status ${audioResponse.status}`,
+                );
+                return NextResponse.json(
+                    {
+                        error: `Failed to download audio from Plaud (HTTP ${audioResponse.status})`,
+                    },
+                    { status: 502 },
+                );
+            }
+
+            const contentType =
+                audioResponse.headers.get("content-type") ||
+                getContentType(recording.storagePath);
+            const responseHeaders: Record<string, string> = {
+                "Content-Type": contentType,
+                "Accept-Ranges": "bytes",
+                "Cache-Control": "public, max-age=3600",
+            };
+
+            const contentLength =
+                audioResponse.headers.get("content-length");
+            if (contentLength) {
+                responseHeaders["Content-Length"] = contentLength;
+            }
+
+            const contentRange =
+                audioResponse.headers.get("content-range");
+            if (contentRange) {
+                responseHeaders["Content-Range"] = contentRange;
+            }
+
+            return new NextResponse(audioResponse.body, {
+                status: audioResponse.status,
+                headers: responseHeaders,
+            });
         }
 
         return NextResponse.json(
