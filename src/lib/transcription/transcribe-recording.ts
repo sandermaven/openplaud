@@ -19,6 +19,64 @@ import { createPlaudClient } from "@/lib/plaud/client";
 import { createUserStorageProvider } from "@/lib/storage/factory";
 import { estimateTranscriptionCost } from "@/lib/transcription/pricing";
 
+// OpenAI Whisper API limit: 25 MB
+const MAX_TRANSCRIPTION_FILE_SIZE = 25 * 1024 * 1024;
+
+// Supported audio extensions for OpenAI Whisper
+const SUPPORTED_EXTENSIONS = new Set([
+    ".flac",
+    ".m4a",
+    ".mp3",
+    ".mp4",
+    ".mpeg",
+    ".mpga",
+    ".oga",
+    ".ogg",
+    ".wav",
+    ".webm",
+]);
+
+/**
+ * Insert a placeholder transcription to prevent endless retries for
+ * recordings that can never be transcribed (too large, wrong format, etc.).
+ */
+async function markTranscriptionFailed(
+    recordingId: string,
+    userId: string,
+    reason: string,
+): Promise<void> {
+    const [existing] = await db
+        .select()
+        .from(transcriptions)
+        .where(eq(transcriptions.recordingId, recordingId))
+        .limit(1);
+
+    if (existing) {
+        await db
+            .update(transcriptions)
+            .set({ text: `[Transcription skipped: ${reason}]` })
+            .where(eq(transcriptions.id, existing.id));
+    } else {
+        await db.insert(transcriptions).values({
+            recordingId,
+            userId,
+            text: `[Transcription skipped: ${reason}]`,
+            transcriptionType: "server",
+        });
+    }
+}
+
+/**
+ * Normalize filename extension to one OpenAI accepts.
+ * E.g. .opus → .ogg (Opus audio is typically in OGG container).
+ */
+function normalizeFilenameForWhisper(filename: string): string {
+    if (filename.endsWith(".opus")) {
+        return `${filename.slice(0, -5)}.ogg`;
+    }
+    return filename;
+}
+
 export async function transcribeRecording(
     userId: string,
     recordingId: string,
@@ -47,6 +105,34 @@ export async function transcribeRecording(
 
         if (existingTranscription?.text) {
             return { success: true };
+        }
+
+        // Check file size before downloading — 25 MB is OpenAI Whisper's limit
+        if (recording.filesize > MAX_TRANSCRIPTION_FILE_SIZE) {
+            const sizeMB = (recording.filesize / 1024 / 1024).toFixed(1);
+            const reason = `File size ${sizeMB}MB exceeds 25MB limit`;
+            console.warn(
+                `[transcription] Skipping ${recordingId}: ${reason}`,
+            );
+            await markTranscriptionFailed(recordingId, userId, reason);
+            return { success: false, error: reason };
+        }
+
+        // Check file format — OpenAI Whisper only supports specific formats
+        const ext = recording.storagePath
+            .slice(recording.storagePath.lastIndexOf("."))
+            .toLowerCase();
+        if (
+            ext &&
+            !SUPPORTED_EXTENSIONS.has(ext) &&
+            ext !== ".opus" // .opus will be renamed to .ogg
+        ) {
+            const reason = `Unsupported audio format: ${ext}`;
+            console.warn(
+                `[transcription] Skipping ${recordingId}: ${reason}`,
+            );
+            await markTranscriptionFailed(recordingId, userId, reason);
+            return { success: false, error: reason };
         }
 
         const [credentials] = await db
@@ -113,10 +199,15 @@ export async function transcribeRecording(
 
         const contentType = recording.storagePath.endsWith(".mp3")
             ? "audio/mpeg"
-            : "audio/opus";
+            : recording.storagePath.endsWith(".opus")
+              ? "audio/ogg"
+              : "audio/mpeg";
+        const normalizedFilename = normalizeFilenameForWhisper(
+            recording.filename,
+        );
         const audioFile = new File(
             [new Uint8Array(audioBuffer)],
-            recording.filename,
+            normalizedFilename,
             { type: contentType },
         );
 
