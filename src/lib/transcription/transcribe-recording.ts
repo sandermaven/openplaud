@@ -17,6 +17,7 @@ import { decrypt } from "@/lib/encryption";
 import { syncTranscriptionToNotion } from "@/lib/notion/sync";
 import { createPlaudClient } from "@/lib/plaud/client";
 import { createUserStorageProvider } from "@/lib/storage/factory";
+import { compressAudioForTranscription } from "@/lib/transcription/compress-audio";
 import { estimateTranscriptionCost } from "@/lib/transcription/pricing";
 
 export async function transcribeRecording(
@@ -111,13 +112,15 @@ export async function transcribeRecording(
             );
         }
 
-        const contentType = recording.storagePath.endsWith(".mp3")
-            ? "audio/mpeg"
-            : "audio/opus";
-        const audioFile = new File(
-            [new Uint8Array(audioBuffer)],
+        // Compress audio if it exceeds Whisper's 25MB limit or has unsupported format
+        const compressed = await compressAudioForTranscription(
+            audioBuffer,
             recording.filename,
-            { type: contentType },
+        );
+        const audioFile = new File(
+            [new Uint8Array(compressed.buffer)],
+            compressed.filename,
+            { type: compressed.contentType },
         );
 
         const model = credentials.defaultModel || "whisper-1";

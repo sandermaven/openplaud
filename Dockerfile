@@ -25,6 +25,9 @@ RUN bun build src/db/migrate-idempotent.ts --target=bun --outfile=migrate-idempo
 FROM base AS runner
 WORKDIR /app
 
+# Install ffmpeg for audio compression (needed for files >25MB before transcription)
+RUN apt-get update && apt-get install -y --no-install-recommends ffmpeg && rm -rf /var/lib/apt/lists/*
+
 ENV NODE_ENV=production
 ENV NEXT_TELEMETRY_DISABLED=1
 
