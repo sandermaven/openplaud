@@ -86,7 +86,6 @@ export function RecordingPlayer({ recording, onEnded }: RecordingPlayerProps) {
         if (!audioRef.current) return;
 
         const audio = audioRef.current;
-        const recordingId = recording.id; // Explicitly use recording to satisfy linter
 
         const updateTime = () => {
             if (!isSeekingRef.current) {
@@ -108,17 +107,19 @@ export function RecordingPlayer({ recording, onEnded }: RecordingPlayerProps) {
             isSeekingRef.current = false;
             setCurrentTime(audio.currentTime);
         };
-
-        if (audio.src !== `/api/recordings/${recordingId}/audio`) {
-            audio.src = `/api/recordings/${recordingId}/audio`;
-            audio.load();
-        }
+        const handleError = () => {
+            setIsPlaying(false);
+            const err = audio.error;
+            console.error("Audio load error:", err?.code, err?.message);
+            toast.error("Failed to load audio");
+        };
 
         audio.addEventListener("timeupdate", updateTime);
         audio.addEventListener("loadedmetadata", updateDuration);
         audio.addEventListener("durationchange", updateDuration);
         audio.addEventListener("ended", handleEnded);
         audio.addEventListener("seeked", handleSeeked);
+        audio.addEventListener("error", handleError);
 
         if (audio.duration && !Number.isNaN(audio.duration)) {
             setDuration(audio.duration);
@@ -130,6 +131,7 @@ export function RecordingPlayer({ recording, onEnded }: RecordingPlayerProps) {
             audio.removeEventListener("durationchange", updateDuration);
             audio.removeEventListener("ended", handleEnded);
             audio.removeEventListener("seeked", handleSeeked);
+            audio.removeEventListener("error", handleError);
         };
     }, [recording, autoPlayNext, onEnded]);
 
@@ -138,14 +140,20 @@ export function RecordingPlayer({ recording, onEnded }: RecordingPlayerProps) {
 
         if (isPlaying) {
             audioRef.current.pause();
+            setIsPlaying(false);
         } else {
             audioRef.current.playbackRate = playbackSpeed;
-            audioRef.current.play().catch((error) => {
-                console.error("Error playing audio:", error);
-                toast.error("Failed to play audio");
-            });
+            audioRef.current
+                .play()
+                .then(() => {
+                    setIsPlaying(true);
+                })
+                .catch((error) => {
+                    console.error("Error playing audio:", error);
+                    setIsPlaying(false);
+                    toast.error("Failed to play audio");
+                });
         }
-        setIsPlaying(!isPlaying);
     }, [isPlaying, playbackSpeed]);
 
     const handleSeek = (value: number[]) => {

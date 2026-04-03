@@ -152,7 +152,7 @@ export async function GET(
             }
         }
 
-        // File not on disk (cleaned up after transcription) — redirect to Plaud temp URL
+        // File not on disk (cleaned up after transcription) — proxy from Plaud temp URL
         if (recording.plaudFileId) {
             const [connection] = await db
                 .select()
@@ -165,11 +165,55 @@ export async function GET(
                     connection.bearerToken,
                     connection.apiBase,
                 );
-                const tempUrl = await plaudClient.getTempUrl(
+                const tempUrlResponse = await plaudClient.getTempUrl(
                     recording.plaudFileId,
                     false,
                 );
-                return NextResponse.redirect(tempUrl.temp_url, 302);
+
+                // Proxy the audio stream instead of redirecting to avoid
+                // cross-origin issues with iOS Safari's audio element
+                const fetchHeaders: HeadersInit = {};
+                const rangeHeader = request.headers.get("range");
+                if (rangeHeader) {
+                    fetchHeaders["Range"] = rangeHeader;
+                }
+
+                const audioResponse = await fetch(tempUrlResponse.temp_url, {
+                    headers: fetchHeaders,
+                });
+
+                if (!audioResponse.ok && audioResponse.status !== 206) {
+                    return NextResponse.json(
+                        { error: "Failed to fetch audio from source" },
+                        { status: 502 },
+                    );
+                }
+
+                const contentType =
+                    audioResponse.headers.get("content-type") ||
+                    getContentType(recording.storagePath);
+                const responseHeaders: Record<string, string> = {
+                    "Content-Type": contentType,
+                    "Accept-Ranges": "bytes",
+                    "Cache-Control": "public, max-age=3600",
+                };
+
+                const contentLength =
+                    audioResponse.headers.get("content-length");
+                if (contentLength) {
+                    responseHeaders["Content-Length"] = contentLength;
+                }
+
+                const contentRange =
+                    audioResponse.headers.get("content-range");
+                if (contentRange) {
+                    responseHeaders["Content-Range"] = contentRange;
+                }
+
+                return new NextResponse(audioResponse.body, {
+                    status: audioResponse.status,
+                    headers: responseHeaders,
+                });
             }
         }
 
