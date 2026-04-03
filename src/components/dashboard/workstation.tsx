@@ -24,6 +24,7 @@ import { TranscriptionPanel } from "./transcription-panel";
 interface TranscriptionData {
     text?: string;
     language?: string;
+    costEstimate?: number;
 }
 
 interface WorkstationProps {

@@ -8,6 +8,7 @@ import { decrypt } from "@/lib/encryption";
 import { syncTranscriptionToNotion } from "@/lib/notion/sync";
 import { createPlaudClient } from "@/lib/plaud/client";
 import { createUserStorageProvider } from "@/lib/storage/factory";
+import { estimateTranscriptionCost } from "@/lib/transcription/pricing";
 
 export async function POST(
     request: Request,
@@ -137,6 +138,14 @@ export async function POST(
                 ? null
                 : (transcription as VerboseTranscription).language || null;
 
+        // Calculate cost estimate
+        const model = credentials.defaultModel || "whisper-1";
+        const costEstimate = estimateTranscriptionCost(
+            credentials.provider,
+            model,
+            recording.duration,
+        );
+
         // Save transcription
         const [existingTranscription] = await db
             .select()
@@ -152,7 +161,8 @@ export async function POST(
                     detectedLanguage,
                     transcriptionType: "server",
                     provider: credentials.provider,
-                    model: credentials.defaultModel || "whisper-1",
+                    model,
+                    costEstimate,
                 })
                 .where(eq(transcriptions.id, existingTranscription.id));
         } else {
@@ -163,7 +173,8 @@ export async function POST(
                 detectedLanguage,
                 transcriptionType: "server",
                 provider: credentials.provider,
-                model: credentials.defaultModel || "whisper-1",
+                model,
+                costEstimate,
             });
         }
 
@@ -187,6 +198,7 @@ export async function POST(
         return NextResponse.json({
             transcription: transcriptionText,
             detectedLanguage,
+            costEstimate,
         });
     } catch (error) {
         console.error("Error transcribing:", error);
