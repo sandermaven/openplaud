@@ -1,8 +1,9 @@
 import { after, NextResponse } from "next/server";
-import { eq } from "drizzle-orm";
+import { and, eq, isNotNull, lt } from "drizzle-orm";
 import { db } from "@/db";
-import { plaudConnections, userSettings } from "@/db/schema";
+import { plaudConnections, recordings, transcriptions, userSettings } from "@/db/schema";
 import { env } from "@/lib/env";
+import { createStorageProvider } from "@/lib/storage/factory";
 import { syncRecordingsForUser } from "@/lib/sync/sync-recordings";
 import { transcribeRecording } from "@/lib/transcription/transcribe-recording";
 
@@ -77,9 +78,10 @@ export async function GET(request: Request) {
         }
     }
 
-    // Run transcriptions after the response is sent
-    if (allPendingTranscriptions.length > 0) {
-        after(async () => {
+    // Run transcriptions and cleanup after the response is sent
+    after(async () => {
+        // Transcribe pending recordings
+        if (allPendingTranscriptions.length > 0) {
             console.log(
                 `[cron-sync] Starting transcription for ${allPendingTranscriptions.length} recording(s)`,
             );
@@ -95,8 +97,80 @@ export async function GET(request: Request) {
                     );
                 }
             }
-        });
-    }
+        }
+
+        // Clean up old recordings based on retention settings
+        try {
+            const usersWithRetention = await db
+                .select({
+                    userId: userSettings.userId,
+                    retentionDays: userSettings.retentionDays,
+                })
+                .from(userSettings)
+                .where(
+                    and(
+                        eq(userSettings.autoDeleteRecordings, true),
+                        isNotNull(userSettings.retentionDays),
+                    ),
+                );
+
+            if (usersWithRetention.length > 0) {
+                const storage = createStorageProvider();
+                let totalDeleted = 0;
+
+                for (const { userId, retentionDays } of usersWithRetention) {
+                    if (!retentionDays || retentionDays < 1) continue;
+
+                    const cutoffDate = new Date();
+                    cutoffDate.setDate(cutoffDate.getDate() - retentionDays);
+
+                    const oldRecordings = await db
+                        .select({
+                            id: recordings.id,
+                            storagePath: recordings.storagePath,
+                        })
+                        .from(recordings)
+                        .innerJoin(
+                            transcriptions,
+                            eq(recordings.id, transcriptions.recordingId),
+                        )
+                        .where(
+                            and(
+                                eq(recordings.userId, userId),
+                                lt(recordings.startTime, cutoffDate),
+                            ),
+                        );
+
+                    for (const recording of oldRecordings) {
+                        try {
+                            try {
+                                await storage.deleteFile(recording.storagePath);
+                            } catch {
+                                // File may already be deleted - that's fine
+                            }
+                            await db
+                                .delete(recordings)
+                                .where(eq(recordings.id, recording.id));
+                            totalDeleted++;
+                        } catch (error) {
+                            console.error(
+                                `[cron-cleanup] Failed to delete recording ${recording.id}:`,
+                                error,
+                            );
+                        }
+                    }
+                }
+
+                if (totalDeleted > 0) {
+                    console.log(
+                        `[cron-cleanup] Deleted ${totalDeleted} old recording(s)`,
+                    );
+                }
+            }
+        } catch (error) {
+            console.error("[cron-cleanup] Cleanup failed:", error);
+        }
+    });
 
     return NextResponse.json({
         success: true,
