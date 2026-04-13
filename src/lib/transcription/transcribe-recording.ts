@@ -112,15 +112,10 @@ export async function transcribeRecording(
             );
         }
 
-        // Compress audio if it exceeds Whisper's 25MB limit or has unsupported format
-        const compressed = await compressAudioForTranscription(
+        // Compress audio and split into chunks if needed
+        const chunks = await compressAudioForTranscription(
             audioBuffer,
             recording.filename,
-        );
-        const audioFile = new File(
-            [new Uint8Array(compressed.buffer)],
-            compressed.filename,
-            { type: compressed.contentType },
         );
 
         const model = credentials.defaultModel || "whisper-1";
@@ -135,32 +130,57 @@ export async function transcribeRecording(
               ? ("json" as const)
               : ("verbose_json" as const);
 
-        const transcription = await openai.audio.transcriptions.create({
-            file: audioFile,
-            model,
-            response_format: responseFormat,
-            ...(defaultLanguage ? { language: defaultLanguage } : {}),
-        });
-
-        let transcriptionText: string;
-        let detectedLanguage: string | null = null;
-
-        if (supportsDiarizedJson) {
-            const diarized = transcription as TranscriptionDiarized;
-            transcriptionText = (diarized.segments ?? [])
-                .map((seg) => `${seg.speaker}: ${seg.text}`)
-                .join("\n");
-            // TranscriptionDiarized doesn't expose language
-        } else if (responseFormat === "verbose_json") {
-            const verbose = transcription as TranscriptionVerbose;
-            transcriptionText = verbose.text;
-            detectedLanguage = verbose.language ?? null;
-        } else {
-            transcriptionText =
-                typeof transcription === "string"
-                    ? transcription
-                    : (transcription.text ?? "");
+        if (chunks.length > 1) {
+            console.log(
+                `[transcribe] Transcribing ${chunks.length} chunks for recording ${recordingId}`,
+            );
         }
+
+        const transcriptionParts: string[] = [];
+        let detectedLanguage: string | null = null;
+        let chunkLanguage = defaultLanguage;
+
+        for (const chunk of chunks) {
+            const audioFile = new File(
+                [new Uint8Array(chunk.buffer)],
+                chunk.filename,
+                { type: chunk.contentType },
+            );
+
+            const transcription = await openai.audio.transcriptions.create({
+                file: audioFile,
+                model,
+                response_format: responseFormat,
+                ...(chunkLanguage ? { language: chunkLanguage } : {}),
+            });
+
+            if (supportsDiarizedJson) {
+                const diarized = transcription as TranscriptionDiarized;
+                transcriptionParts.push(
+                    (diarized.segments ?? [])
+                        .map((seg) => `${seg.speaker}: ${seg.text}`)
+                        .join("\n"),
+                );
+            } else if (responseFormat === "verbose_json") {
+                const verbose = transcription as TranscriptionVerbose;
+                transcriptionParts.push(verbose.text);
+                if (!detectedLanguage) {
+                    detectedLanguage = verbose.language ?? null;
+                    // Use detected language for remaining chunks
+                    if (detectedLanguage && !chunkLanguage) {
+                        chunkLanguage = detectedLanguage;
+                    }
+                }
+            } else {
+                transcriptionParts.push(
+                    typeof transcription === "string"
+                        ? transcription
+                        : (transcription.text ?? ""),
+                );
+            }
+        }
+
+        const transcriptionText = transcriptionParts.join("\n");
 
         const costEstimate = estimateTranscriptionCost(
             credentials.provider,
