@@ -1,9 +1,20 @@
 "use client";
 
-import { Pause, Play, Volume2 } from "lucide-react";
+import { Pause, Play, Trash2, Volume2 } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
 import { MetalButton } from "@/components/metal-button";
+import {
+    AlertDialog,
+    AlertDialogAction,
+    AlertDialogCancel,
+    AlertDialogContent,
+    AlertDialogDescription,
+    AlertDialogFooter,
+    AlertDialogHeader,
+    AlertDialogTitle,
+    AlertDialogTrigger,
+} from "@/components/ui/alert-dialog";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Slider } from "@/components/ui/slider";
@@ -12,6 +23,7 @@ import type { Recording } from "@/types/recording";
 interface RecordingPlayerProps {
     recording: Recording;
     onEnded?: () => void;
+    onDelete?: (recordingId: string) => void;
 }
 
 const playbackSpeedOptions = [
@@ -23,7 +35,11 @@ const playbackSpeedOptions = [
     { label: "2x", value: 2.0 },
 ];
 
-export function RecordingPlayer({ recording, onEnded }: RecordingPlayerProps) {
+export function RecordingPlayer({
+    recording,
+    onEnded,
+    onDelete,
+}: RecordingPlayerProps) {
     const [isPlaying, setIsPlaying] = useState(false);
     const [currentTime, setCurrentTime] = useState(0);
     const [duration, setDuration] = useState(0);
@@ -241,10 +257,51 @@ export function RecordingPlayer({ recording, onEnded }: RecordingPlayerProps) {
     return (
         <Card>
             <CardHeader>
-                <CardTitle>{recording.filename}</CardTitle>
-                <p className="text-sm text-muted-foreground">
-                    {new Date(recording.startTime).toLocaleString()}
-                </p>
+                <div className="flex items-start justify-between">
+                    <div>
+                        <CardTitle>{recording.filename}</CardTitle>
+                        <p className="text-sm text-muted-foreground">
+                            {new Date(recording.startTime).toLocaleString()}
+                        </p>
+                    </div>
+                    {onDelete && (
+                        <AlertDialog>
+                            <AlertDialogTrigger asChild>
+                                <Button
+                                    variant="ghost"
+                                    size="icon"
+                                    className="text-muted-foreground hover:text-destructive"
+                                >
+                                    <Trash2 className="w-4 h-4" />
+                                </Button>
+                            </AlertDialogTrigger>
+                            <AlertDialogContent>
+                                <AlertDialogHeader>
+                                    <AlertDialogTitle>
+                                        Recording verwijderen?
+                                    </AlertDialogTitle>
+                                    <AlertDialogDescription>
+                                        Dit verwijdert de opname, het
+                                        audiobestand en eventuele transcripties
+                                        permanent. Dit kan niet ongedaan worden
+                                        gemaakt.
+                                    </AlertDialogDescription>
+                                </AlertDialogHeader>
+                                <AlertDialogFooter>
+                                    <AlertDialogCancel>
+                                        Annuleren
+                                    </AlertDialogCancel>
+                                    <AlertDialogAction
+                                        onClick={() => onDelete(recording.id)}
+                                        className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+                                    >
+                                        Verwijderen
+                                    </AlertDialogAction>
+                                </AlertDialogFooter>
+                            </AlertDialogContent>
+                        </AlertDialog>
+                    )}
+                </div>
             </CardHeader>
             <CardContent className="space-y-4">
                 <div className="flex items-center gap-4">

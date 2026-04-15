@@ -164,6 +164,28 @@ export function Workstation({
         }
     }, [settingsOpen]);
 
+    const handleDelete = useCallback(
+        async (recordingId: string) => {
+            try {
+                const response = await fetch(`/api/recordings/${recordingId}`, {
+                    method: "DELETE",
+                });
+
+                if (response.ok) {
+                    toast.success("Recording verwijderd");
+                    setCurrentRecording(null);
+                    router.refresh();
+                } else {
+                    const error = await response.json();
+                    toast.error(error.error || "Verwijderen mislukt");
+                }
+            } catch {
+                toast.error("Verwijderen mislukt");
+            }
+        },
+        [router],
+    );
+
     const handleTranscribe = useCallback(async () => {
         if (!currentRecording) return;
 
@@ -293,6 +315,7 @@ export function Workstation({
                                     <>
                                         <RecordingPlayer
                                             recording={currentRecording}
+                                            onDelete={handleDelete}
                                             onEnded={() => {
                                                 const currentIndex =
                                                     recordings.findIndex(
