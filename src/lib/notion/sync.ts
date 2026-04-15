@@ -1,26 +1,35 @@
 import { eq } from "drizzle-orm";
 import { db } from "@/db";
 import { recordings, transcriptions } from "@/db/schema";
-import { env } from "@/lib/env";
-
-const SCRIBE_WEBHOOK_URL =
-    "https://cal-agent-production.up.railway.app/scribe/webhook";
+import { buildNotionPageContent } from "@/lib/notion/blocks";
+import { createNotionClientFromToken } from "@/lib/notion/client";
+import { getNotionConfig } from "@/lib/notion/config";
 
 /**
- * Sync a transcription to Scribe. Scribe enriches the transcript and
- * creates the Notion page. Non-blocking: catches all errors internally.
+ * Format duration in milliseconds to a human-readable string like "19m 45s"
+ */
+function formatDuration(durationMs: number): string {
+    const totalSeconds = Math.floor(durationMs / 1000);
+    const hours = Math.floor(totalSeconds / 3600);
+    const minutes = Math.floor((totalSeconds % 3600) / 60);
+    const seconds = totalSeconds % 60;
+
+    if (hours > 0) {
+        return `${hours}h ${minutes}m`;
+    }
+    return `${minutes}m ${seconds}s`;
+}
+
+/**
+ * Sync a transcription directly to Notion as a new page in the configured database.
+ * Sets properties: Name, Type=Transcript, Bron=Plaud, Status=Inbox,
+ * Language, Recorded (date+time), Duration.
+ * Page body contains the full transcription text.
  */
 export async function syncTranscriptionToNotion(
     transcriptionId: string,
 ): Promise<void> {
     try {
-        const secret = env.SCRIBE_WEBHOOK_SECRET;
-        if (!secret) {
-            console.error("Scribe sync: SCRIBE_WEBHOOK_SECRET not configured");
-            return;
-        }
-
-        // Fetch transcription
         const [txn] = await db
             .select()
             .from(transcriptions)
@@ -28,11 +37,13 @@ export async function syncTranscriptionToNotion(
             .limit(1);
 
         if (!txn) {
-            console.error("Scribe sync: transcription not found", transcriptionId);
+            console.error(
+                "[notion-sync] Transcription not found:",
+                transcriptionId,
+            );
             return;
         }
 
-        // Fetch recording
         const [recording] = await db
             .select()
             .from(recordings)
@@ -40,7 +51,16 @@ export async function syncTranscriptionToNotion(
             .limit(1);
 
         if (!recording) {
-            console.error("Scribe sync: recording not found", txn.recordingId);
+            console.error(
+                "[notion-sync] Recording not found:",
+                txn.recordingId,
+            );
+            return;
+        }
+
+        const config = await getNotionConfig(txn.userId);
+        if (!config || !config.enabled) {
+            console.log("[notion-sync] Notion not configured or disabled");
             return;
         }
 
@@ -50,40 +70,96 @@ export async function syncTranscriptionToNotion(
             .set({ notionSyncStatus: "syncing" })
             .where(eq(transcriptions.id, transcriptionId));
 
-        // Send raw transcript to Scribe
-        const payload = {
-            title: recording.filename,
-            transcript: txn.text,
-            recordingDate: recording.startTime.toISOString(),
+        const notion = createNotionClientFromToken(config.token);
+
+        // Build page properties
+        const properties: Record<string, unknown> = {
+            Name: {
+                title: [{ text: { content: recording.filename } }],
+            },
+            Type: {
+                select: { name: "Transcript" },
+            },
+            Bron: {
+                select: { name: "Plaud" },
+            },
+            Status: {
+                status: { name: "Inbox" },
+            },
+            Duration: {
+                rich_text: [
+                    {
+                        text: {
+                            content: formatDuration(recording.duration),
+                        },
+                    },
+                ],
+            },
+            Recorded: {
+                date: {
+                    start: recording.startTime.toISOString(),
+                },
+            },
         };
 
-        const response = await fetch(SCRIBE_WEBHOOK_URL, {
-            method: "POST",
-            headers: {
-                "Content-Type": "application/json",
-                "X-Webhook-Secret": secret,
-            },
-            body: JSON.stringify(payload),
-        });
-
-        if (!response.ok) {
-            const body = await response.text().catch(() => "");
-            throw new Error(
-                `Scribe webhook returned ${response.status}: ${body}`,
-            );
+        // Add language if detected
+        const language = txn.detectedLanguage?.toLowerCase();
+        if (language === "dutch" || language === "english") {
+            properties.Language = {
+                select: { name: language },
+            };
         }
 
-        // Update transcription with success
+        // Build page content blocks (transcription text)
+        const blockBatches = buildNotionPageContent({
+            title: recording.filename,
+            transcriptionText: txn.text,
+            recordingUrl: `https://openplaud.maven-company.com/recordings/${recording.id}`,
+            duration: recording.duration,
+            date: recording.startTime.toISOString(),
+            language: txn.detectedLanguage ?? undefined,
+            includeSummary: false,
+            includeActionItems: false,
+        });
+
+        // Create the Notion page with first batch of blocks
+        const page = await notion.pages.create({
+            parent: { database_id: config.databaseId },
+            properties: properties as Parameters<
+                typeof notion.pages.create
+            >[0]["properties"],
+            children: blockBatches[0] ?? [],
+        });
+
+        // Append remaining block batches (if transcription is very long)
+        for (let i = 1; i < blockBatches.length; i++) {
+            await notion.blocks.children.append({
+                block_id: page.id,
+                children: blockBatches[i],
+            });
+        }
+
+        // Extract the page URL
+        const pageUrl =
+            "url" in page ? (page.url as string) : null;
+
+        // Update transcription with success + Notion page reference
         await db
             .update(transcriptions)
             .set({
                 notionSyncStatus: "synced",
                 notionSyncError: null,
                 notionSyncedAt: new Date(),
+                notionPageId: page.id,
+                notionPageUrl: pageUrl,
             })
             .where(eq(transcriptions.id, transcriptionId));
+
+        console.log(
+            `[notion-sync] Synced transcription ${transcriptionId} → ${pageUrl}`,
+        );
     } catch (error) {
-        console.error("Scribe sync failed:", error);
+        console.error("[notion-sync] Failed:", error);
 
         try {
             await db
@@ -97,7 +173,10 @@ export async function syncTranscriptionToNotion(
                 })
                 .where(eq(transcriptions.id, transcriptionId));
         } catch (dbError) {
-            console.error("Failed to update sync error status:", dbError);
+            console.error(
+                "[notion-sync] Failed to update error status:",
+                dbError,
+            );
         }
     }
 }
