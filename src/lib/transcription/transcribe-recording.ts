@@ -20,6 +20,33 @@ import { createUserStorageProvider } from "@/lib/storage/factory";
 import { compressAudioForTranscription } from "@/lib/transcription/compress-audio";
 import { estimateTranscriptionCost } from "@/lib/transcription/pricing";
 
+// Whisper's verbose_json returns the language as a full English name
+// (e.g. "english", "dutch"), but the API's `language` parameter requires
+// an ISO-639-1 code. Map known names to codes; unknown values fall through
+// to undefined so the request omits `language` and Whisper auto-detects.
+const LANGUAGE_NAME_TO_CODE: Record<string, string> = {
+    english: "en",
+    dutch: "nl",
+    spanish: "es",
+    french: "fr",
+    german: "de",
+    italian: "it",
+    portuguese: "pt",
+    chinese: "zh",
+    japanese: "ja",
+    korean: "ko",
+    russian: "ru",
+};
+
+function normalizeLanguage(
+    lang: string | null | undefined,
+): string | undefined {
+    if (!lang) return undefined;
+    const lower = lang.toLowerCase().trim();
+    if (lower.length === 2) return lower;
+    return LANGUAGE_NAME_TO_CODE[lower];
+}
+
 export async function transcribeRecording(
     userId: string,
     recordingId: string,
@@ -71,8 +98,9 @@ export async function transcribeRecording(
             .where(eq(userSettings.userId, userId))
             .limit(1);
 
-        const defaultLanguage =
-            settings?.defaultTranscriptionLanguage || undefined;
+        const defaultLanguage = normalizeLanguage(
+            settings?.defaultTranscriptionLanguage,
+        );
         const quality = settings?.transcriptionQuality || "balanced";
         const autoGenerateTitle = settings?.autoGenerateTitle ?? true;
         const syncTitleToPlaud = settings?.syncTitleToPlaud ?? false;
@@ -166,9 +194,8 @@ export async function transcribeRecording(
                 transcriptionParts.push(verbose.text);
                 if (!detectedLanguage) {
                     detectedLanguage = verbose.language ?? null;
-                    // Use detected language for remaining chunks
-                    if (detectedLanguage && !chunkLanguage) {
-                        chunkLanguage = detectedLanguage;
+                    if (!chunkLanguage) {
+                        chunkLanguage = normalizeLanguage(detectedLanguage);
                     }
                 }
             } else {

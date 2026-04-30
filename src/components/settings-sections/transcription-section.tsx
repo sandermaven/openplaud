@@ -17,6 +17,7 @@ import { useSettings } from "@/hooks/use-settings";
 const languageOptions = [
     { label: "Auto-detect", value: null },
     { label: "English", value: "en" },
+    { label: "Dutch", value: "nl" },
     { label: "Spanish", value: "es" },
     { label: "French", value: "fr" },
     { label: "German", value: "de" },
