@@ -141,6 +141,14 @@ export const recordings = pgTable(
         zonemins: integer("zonemins"),
         scene: integer("scene"),
         isTrash: boolean("is_trash").notNull().default(false),
+        // Transcription failure tracking — prevents retry-storms when Whisper
+        // returns a persistent error (quota, invalid input, etc.). The pending
+        // query honours both the cooldown and the failure count cap.
+        lastTranscriptionAttemptAt: timestamp("last_transcription_attempt_at"),
+        transcriptionFailureCount: integer("transcription_failure_count")
+            .notNull()
+            .default(0),
+        transcriptionError: text("transcription_error"),
         createdAt: timestamp("created_at").notNull().defaultNow(),
         updatedAt: timestamp("updated_at").notNull().defaultNow(),
     },

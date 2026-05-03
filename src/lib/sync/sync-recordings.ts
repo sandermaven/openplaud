@@ -1,4 +1,4 @@
-import { and, eq, notInArray } from "drizzle-orm";
+import { and, eq, isNull, lt, notInArray, or } from "drizzle-orm";
 import { db } from "@/db";
 import {
     plaudConnections,
@@ -25,6 +25,11 @@ const SYNC_CONFIG = {
     /** Maximum pages to process in a single sync (prevents runaway) */
     MAX_PAGES: 20,
 } as const;
+
+/** Skip a recording for one hour after a failed transcription attempt. */
+const TRANSCRIPTION_FAILURE_COOLDOWN_MS = 60 * 60 * 1000;
+/** Give up auto-retrying after this many consecutive failures. */
+const TRANSCRIPTION_MAX_FAILURES = 5;
 
 interface SyncResult {
     newRecordings: number;
@@ -362,12 +367,19 @@ export async function syncRecordingsForUser(
             }
         }
 
-        // Collect IDs of recordings that need transcription
+        // Collect IDs of recordings that need transcription. Skip ones that
+        // failed too recently (cooldown) or exceeded the failure cap, so a
+        // persistent error (quota, rate limit, invalid input) doesn't generate
+        // a retry-storm.
         if (context.autoTranscribe) {
             const transcribedRecordingIds = db
                 .select({ recordingId: transcriptions.recordingId })
                 .from(transcriptions)
                 .where(eq(transcriptions.userId, userId));
+
+            const cooldown = new Date(
+                Date.now() - TRANSCRIPTION_FAILURE_COOLDOWN_MS,
+            );
 
             const untranscribed = await db
                 .select({ id: recordings.id })
@@ -376,6 +388,14 @@ export async function syncRecordingsForUser(
                     and(
                         eq(recordings.userId, userId),
                         notInArray(recordings.id, transcribedRecordingIds),
+                        lt(
+                            recordings.transcriptionFailureCount,
+                            TRANSCRIPTION_MAX_FAILURES,
+                        ),
+                        or(
+                            isNull(recordings.lastTranscriptionAttemptAt),
+                            lt(recordings.lastTranscriptionAttemptAt, cooldown),
+                        ),
                     ),
                 );
 

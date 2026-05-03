@@ -195,6 +195,15 @@ export async function POST(
             console.error("Scribe sync trigger failed:", error);
         }
 
+        await db
+            .update(recordings)
+            .set({
+                lastTranscriptionAttemptAt: new Date(),
+                transcriptionFailureCount: 0,
+                transcriptionError: null,
+            })
+            .where(eq(recordings.id, id));
+
         return NextResponse.json({
             transcription: transcriptionText,
             detectedLanguage,

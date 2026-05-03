@@ -1,4 +1,4 @@
-import { and, eq } from "drizzle-orm";
+import { and, eq, sql } from "drizzle-orm";
 import { OpenAI } from "openai";
 import type {
     TranscriptionDiarized,
@@ -47,7 +47,30 @@ function normalizeLanguage(
     return LANGUAGE_NAME_TO_CODE[lower];
 }
 
+// Serialize all transcription work across the whole process. ffmpeg + Whisper
+// chunked transcription on a 1GB e2-micro can OOM-cascade if two loops run
+// concurrently. Each call awaits the previous; failures don't propagate.
+let activeTranscription: Promise<unknown> = Promise.resolve();
+
 export async function transcribeRecording(
+    userId: string,
+    recordingId: string,
+): Promise<{ success: boolean; error?: string }> {
+    const previous = activeTranscription;
+    let release!: () => void;
+    activeTranscription = new Promise<void>((resolve) => {
+        release = resolve;
+    });
+
+    try {
+        await previous.catch(() => undefined);
+        return await runTranscription(userId, recordingId);
+    } finally {
+        release();
+    }
+}
+
+async function runTranscription(
     userId: string,
     recordingId: string,
 ): Promise<{ success: boolean; error?: string }> {
@@ -311,13 +334,34 @@ export async function transcribeRecording(
             console.error("Scribe sync trigger failed:", error);
         }
 
+        await db
+            .update(recordings)
+            .set({
+                lastTranscriptionAttemptAt: new Date(),
+                transcriptionFailureCount: 0,
+                transcriptionError: null,
+            })
+            .where(eq(recordings.id, recordingId));
+
         return { success: true };
     } catch (error) {
+        const message =
+            error instanceof Error ? error.message : "Transcription failed";
         console.error("Error transcribing recording:", error);
-        return {
-            success: false,
-            error:
-                error instanceof Error ? error.message : "Transcription failed",
-        };
+
+        try {
+            await db
+                .update(recordings)
+                .set({
+                    lastTranscriptionAttemptAt: new Date(),
+                    transcriptionFailureCount: sql`${recordings.transcriptionFailureCount} + 1`,
+                    transcriptionError: message.slice(0, 1000),
+                })
+                .where(eq(recordings.id, recordingId));
+        } catch (markErr) {
+            console.error("Failed to mark transcription failure:", markErr);
+        }
+
+        return { success: false, error: message };
     }
 }
