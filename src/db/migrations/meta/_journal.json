@@ -99,6 +99,13 @@
       "when": 1775340000000,
       "tag": "0013_add_transcription_cost",
       "breakpoints": true
+    },
+    {
+      "idx": 14,
+      "version": "7",
+      "when": 1777597200000,
+      "tag": "0014_transcription_failure_tracking",
+      "breakpoints": true
     }
   ]
 }
