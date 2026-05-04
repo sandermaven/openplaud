@@ -9,10 +9,14 @@ export const maxDuration = 300; // 5 minutes
 
 /**
  * Cron endpoint to clean up old recordings based on user retention settings.
- * Deletes audio files from storage and recording rows from the database
- * for users who have autoDeleteRecordings enabled with a retentionDays value.
+ * Deletes the audio file from storage but keeps the recording + transcription
+ * rows. The Plaud server retains the original audio long after we expire it
+ * locally, so removing the row would let the next sync pull the file back as
+ * "new" and re-trigger transcription — burning OpenAI credit and producing
+ * duplicate Notion pages. Keeping the row preserves the plaud_file_id as a
+ * dedup key.
  *
- * Only recordings that have already been transcribed are deleted.
+ * Only recordings that have already been transcribed are touched.
  */
 export async function GET(request: Request) {
     const authHeader = request.headers.get("authorization");
@@ -79,37 +83,23 @@ export async function GET(request: Request) {
                     ),
                 );
 
-            let deletedForUser = 0;
+            let cleanedForUser = 0;
 
             for (const recording of oldRecordings) {
                 try {
-                    // Try to delete the audio file from storage (may already be gone)
-                    try {
-                        await storage.deleteFile(recording.storagePath);
-                    } catch {
-                        // File may already be deleted after transcription - that's fine
-                    }
-
-                    // Delete the recording row (transcriptions cascade via FK)
-                    await db
-                        .delete(recordings)
-                        .where(eq(recordings.id, recording.id));
-
-                    deletedForUser++;
-                } catch (error) {
-                    console.error(
-                        `[cron-cleanup] Failed to delete recording ${recording.id}:`,
-                        error,
-                    );
+                    await storage.deleteFile(recording.storagePath);
+                    cleanedForUser++;
+                } catch {
+                    // File may already be gone after transcription — fine.
                 }
             }
 
-            totalDeleted += deletedForUser;
-            results.push({ userId, deleted: deletedForUser });
+            totalDeleted += cleanedForUser;
+            results.push({ userId, deleted: cleanedForUser });
 
-            if (deletedForUser > 0) {
+            if (cleanedForUser > 0) {
                 console.log(
-                    `[cron-cleanup] Deleted ${deletedForUser} old recording(s) for user ${userId} (retention: ${retentionDays} days)`,
+                    `[cron-cleanup] Removed audio for ${cleanedForUser} old recording(s) for user ${userId} (retention: ${retentionDays} days; rows preserved)`,
                 );
             }
         } catch (error) {
