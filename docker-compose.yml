@@ -1,13 +1,11 @@
-version: '3.8'
-
 services:
   db:
-    image: postgres:16-alpine
+    image: postgres:17-alpine
     container_name: openplaud-db
     restart: unless-stopped
     environment:
       POSTGRES_USER: postgres
-      POSTGRES_PASSWORD: postgres
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
       POSTGRES_DB: openplaud
     volumes:
       - pgdata:/var/lib/postgresql/data
@@ -29,7 +27,7 @@ services:
       - "3000:3000"
     environment:
       # Database
-      DATABASE_URL: postgresql://postgres:postgres@db:5432/openplaud
+      DATABASE_URL: ${DATABASE_URL}
 
       # Auth
       BETTER_AUTH_SECRET: ${BETTER_AUTH_SECRET}
@@ -45,6 +43,12 @@ services:
       S3_REGION: ${S3_REGION:-}
       S3_ACCESS_KEY_ID: ${S3_ACCESS_KEY_ID:-}
       S3_SECRET_ACCESS_KEY: ${S3_SECRET_ACCESS_KEY:-}
+
+      # Cron + integrations
+      CRON_SECRET: ${CRON_SECRET:-}
+      NOTION_TOKEN: ${NOTION_TOKEN:-}
+      NOTION_DATABASE_ID: ${NOTION_DATABASE_ID:-}
+      SCRIBE_WEBHOOK_SECRET: ${SCRIBE_WEBHOOK_SECRET:-}
     volumes:
       - audio:/app/audio
     depends_on:
