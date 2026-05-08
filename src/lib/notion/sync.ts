@@ -20,6 +20,20 @@ function formatDuration(durationMs: number): string {
     return `${minutes}m ${seconds}s`;
 }
 
+const DUTCH_WEEKDAYS = ["zo", "ma", "di", "wo", "do", "vr", "za"];
+
+/**
+ * Format a recording into a compact Notion title like "do 08-05-26 | 19m".
+ */
+function formatTranscriptTitle(startTime: Date, durationMs: number): string {
+    const weekday = DUTCH_WEEKDAYS[startTime.getDay()];
+    const dd = startTime.getDate().toString().padStart(2, "0");
+    const mm = (startTime.getMonth() + 1).toString().padStart(2, "0");
+    const yy = (startTime.getFullYear() % 100).toString().padStart(2, "0");
+    const minutes = Math.max(1, Math.round(durationMs / 60000));
+    return `${weekday} ${dd}-${mm}-${yy} | ${minutes}m`;
+}
+
 /**
  * Sync a transcription directly to Notion as a new page in the configured database.
  * Sets properties: Name, Type=Transcript, Bron=Plaud, Status=Inbox,
@@ -72,10 +86,15 @@ export async function syncTranscriptionToNotion(
 
         const notion = createNotionClientFromToken(config.token);
 
+        const pageTitle = formatTranscriptTitle(
+            recording.startTime,
+            recording.duration,
+        );
+
         // Build page properties
         const properties: Record<string, unknown> = {
             Name: {
-                title: [{ text: { content: recording.filename } }],
+                title: [{ text: { content: pageTitle } }],
             },
             Type: {
                 select: { name: "Transcript" },
