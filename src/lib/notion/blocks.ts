@@ -1,17 +1,13 @@
 import type { BlockObjectRequest } from "@notionhq/client/build/src/api-endpoints";
 
 const MAX_RICH_TEXT_LENGTH = 2000;
+const MAX_RICH_TEXT_PER_BLOCK = 100;
 const MAX_BLOCKS_PER_REQUEST = 100;
 
 interface NotionPageContentInput {
-    title: string;
     transcriptionText: string;
     summary?: string | null;
     actionItems?: string[] | null;
-    recordingUrl: string;
-    duration?: number;
-    date?: string;
-    language?: string;
     includeSummary?: boolean;
     includeActionItems?: boolean;
 }
@@ -110,64 +106,25 @@ export function buildNotionPageContent(
         }
     }
 
-    // Full Transcription section
-    blocks.push({
-        object: "block" as const,
-        type: "heading_2",
-        heading_2: {
-            rich_text: [
-                { type: "text", text: { content: "Full Transcription" } },
-            ],
-        },
-    });
-
-    for (const chunk of chunkText(input.transcriptionText)) {
+    // Transcription as a single markdown code block (multiple if it exceeds the
+    // 100-rich_text-items-per-block limit). Code blocks share metadata across
+    // their rich_text items, so this is far cheaper to read back than one
+    // paragraph block per chunk.
+    const chunks = chunkText(input.transcriptionText);
+    for (let i = 0; i < chunks.length; i += MAX_RICH_TEXT_PER_BLOCK) {
+        const slice = chunks.slice(i, i + MAX_RICH_TEXT_PER_BLOCK);
         blocks.push({
             object: "block" as const,
-            type: "paragraph",
-            paragraph: {
-                rich_text: [{ type: "text", text: { content: chunk } }],
+            type: "code",
+            code: {
+                rich_text: slice.map((c) => ({
+                    type: "text",
+                    text: { content: c },
+                })),
+                language: "markdown",
             },
         });
     }
-
-    // Metadata section
-    blocks.push({
-        object: "block" as const,
-        type: "divider",
-        divider: {},
-    });
-
-    const metaParts: string[] = [];
-    if (input.duration) {
-        const minutes = Math.floor(input.duration / 60000);
-        const seconds = Math.floor((input.duration % 60000) / 1000);
-        metaParts.push(`Duration: ${minutes}:${seconds.toString().padStart(2, "0")}`);
-    }
-    if (input.date) {
-        metaParts.push(`Date: ${input.date}`);
-    }
-    if (input.language) {
-        metaParts.push(`Language: ${input.language}`);
-    }
-    metaParts.push(`Source: ${input.recordingUrl}`);
-
-    blocks.push({
-        object: "block" as const,
-        type: "paragraph",
-        paragraph: {
-            rich_text: [
-                {
-                    type: "text",
-                    text: { content: metaParts.join(" | ") },
-                    annotations: {
-                        italic: true,
-                        color: "gray",
-                    },
-                },
-            ],
-        },
-    });
 
     // Batch into groups of MAX_BLOCKS_PER_REQUEST
     const batches: BlockObjectRequest[][] = [];

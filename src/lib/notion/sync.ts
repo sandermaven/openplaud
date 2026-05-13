@@ -131,12 +131,7 @@ export async function syncTranscriptionToNotion(
 
         // Build page content blocks (transcription text)
         const blockBatches = buildNotionPageContent({
-            title: recording.filename,
             transcriptionText: txn.text,
-            recordingUrl: `https://openplaud.maven-company.com/recordings/${recording.id}`,
-            duration: recording.duration,
-            date: recording.startTime.toISOString(),
-            language: txn.detectedLanguage ?? undefined,
             includeSummary: false,
             includeActionItems: false,
         });
