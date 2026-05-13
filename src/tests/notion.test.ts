@@ -59,30 +59,55 @@ describe("Notion Integration", () => {
     });
 
     describe("buildNotionPageContent", () => {
-        it("should create blocks for basic transcription", () => {
+        it("should render transcription as a single markdown code block", () => {
             const batches = buildNotionPageContent({
-                title: "Test Recording",
                 transcriptionText: "This is a test transcription.",
-                recordingUrl: "http://localhost:3000/recordings/abc",
             });
 
             expect(batches).toHaveLength(1);
             const blocks = batches[0];
 
-            // Should have: heading2 (Full Transcription), paragraph (text), divider, paragraph (metadata)
-            expect(blocks.length).toBeGreaterThanOrEqual(4);
+            expect(blocks).toHaveLength(1);
+            const codeBlock = blocks[0];
+            expect(codeBlock.type).toBe("code");
+            if (codeBlock.type === "code") {
+                expect(codeBlock.code.language).toBe("markdown");
+                expect(codeBlock.code.rich_text).toHaveLength(1);
+                const item = codeBlock.code.rich_text[0];
+                expect(
+                    item.type === "text" && item.text.content,
+                ).toBe("This is a test transcription.");
+            }
+        });
 
-            // First block should be heading for "Full Transcription" (no summary or action items)
-            const headingBlock = blocks[0];
-            expect(headingBlock.type).toBe("heading_2");
+        it("should chunk long transcriptions into rich_text items within one code block", () => {
+            const longText = "x".repeat(5000);
+            const batches = buildNotionPageContent({
+                transcriptionText: longText,
+            });
+
+            const blocks = batches[0];
+            expect(blocks).toHaveLength(1);
+            const codeBlock = blocks[0];
+            expect(codeBlock.type).toBe("code");
+            if (codeBlock.type === "code") {
+                expect(codeBlock.code.rich_text.length).toBeGreaterThanOrEqual(
+                    3,
+                );
+                for (const item of codeBlock.code.rich_text) {
+                    if (item.type === "text") {
+                        expect(item.text.content.length).toBeLessThanOrEqual(
+                            2000,
+                        );
+                    }
+                }
+            }
         });
 
         it("should include summary section when provided", () => {
             const batches = buildNotionPageContent({
-                title: "Test",
                 transcriptionText: "Transcription text",
                 summary: "This is a summary",
-                recordingUrl: "http://localhost:3000/recordings/abc",
                 includeSummary: true,
             });
 
@@ -99,10 +124,8 @@ describe("Notion Integration", () => {
 
         it("should include action items as to_do blocks", () => {
             const batches = buildNotionPageContent({
-                title: "Test",
                 transcriptionText: "Transcription text",
                 actionItems: ["Item 1", "Item 2", "Item 3"],
-                recordingUrl: "http://localhost:3000/recordings/abc",
                 includeActionItems: true,
             });
 
@@ -113,10 +136,8 @@ describe("Notion Integration", () => {
 
         it("should skip summary when includeSummary is false", () => {
             const batches = buildNotionPageContent({
-                title: "Test",
                 transcriptionText: "Transcription text",
                 summary: "This should be skipped",
-                recordingUrl: "http://localhost:3000/recordings/abc",
                 includeSummary: false,
             });
 
@@ -133,10 +154,8 @@ describe("Notion Integration", () => {
 
         it("should skip action items when includeActionItems is false", () => {
             const batches = buildNotionPageContent({
-                title: "Test",
                 transcriptionText: "Transcription text",
                 actionItems: ["Item 1"],
-                recordingUrl: "http://localhost:3000/recordings/abc",
                 includeActionItems: false,
             });
 
@@ -146,48 +165,18 @@ describe("Notion Integration", () => {
         });
 
         it("should batch blocks at 100 blocks per batch", () => {
-            // Create a very long transcription that will generate many blocks
-            const longText = Array.from({ length: 200 })
-                .map((_, i) => `Paragraph ${i}: ${"x".repeat(1900)}`)
-                .join("\n\n");
+            // Many action items → many to_do blocks → multiple batches
+            const items = Array.from({ length: 250 }, (_, i) => `Item ${i}`);
 
             const batches = buildNotionPageContent({
-                title: "Long Recording",
-                transcriptionText: longText,
-                recordingUrl: "http://localhost:3000/recordings/abc",
+                transcriptionText: "short",
+                actionItems: items,
+                includeActionItems: true,
             });
 
-            // Should have multiple batches
             expect(batches.length).toBeGreaterThan(1);
-
-            // Each batch should have at most 100 blocks
             for (const batch of batches) {
                 expect(batch.length).toBeLessThanOrEqual(100);
-            }
-        });
-
-        it("should include metadata in the last block", () => {
-            const batches = buildNotionPageContent({
-                title: "Test",
-                transcriptionText: "Some text",
-                recordingUrl: "http://localhost:3000/recordings/abc",
-                duration: 120000, // 2 minutes
-                date: "2024-01-15T10:00:00Z",
-                language: "nl",
-            });
-
-            const lastBatch = batches[batches.length - 1];
-            const lastBlock = lastBatch[lastBatch.length - 1];
-
-            expect(lastBlock.type).toBe("paragraph");
-            if (lastBlock.type === "paragraph") {
-                const content =
-                    lastBlock.paragraph.rich_text[0].type === "text"
-                        ? lastBlock.paragraph.rich_text[0].text.content
-                        : "";
-                expect(content).toContain("Duration: 2:00");
-                expect(content).toContain("Language: nl");
-                expect(content).toContain("Source:");
             }
         });
     });
