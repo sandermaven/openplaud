@@ -323,10 +323,18 @@ export async function syncRecordingsForUser(
             page++;
         }
 
-        // Update last sync time
+        // Update last sync time. If the client auto-redirected to a
+        // region-specific domain, persist the corrected base so future
+        // syncs skip the redirect round-trip.
+        const resolvedApiBase = plaudClient.getApiBase();
         await db
             .update(plaudConnections)
-            .set({ lastSync: new Date() })
+            .set({
+                lastSync: new Date(),
+                ...(resolvedApiBase !== connection.apiBase
+                    ? { apiBase: resolvedApiBase }
+                    : {}),
+            })
             .where(eq(plaudConnections.id, connection.id));
 
         // Send notifications

@@ -37,12 +37,27 @@ export class PlaudClient {
     }
 
     /**
-     * Make authenticated request to Plaud API with retry logic
+     * The API base currently in use. May differ from the constructor value
+     * if Plaud redirected us to a region-specific domain — callers should
+     * persist this so future requests skip the redirect round-trip.
+     */
+    getApiBase(): string {
+        return this.apiBase;
+    }
+
+    /**
+     * Make authenticated request to Plaud API with retry logic.
+     *
+     * Plaud signals application-level errors with HTTP 200 and a negative
+     * `status` field in the body (e.g. -302 "user region mismatch"). We must
+     * inspect the body, not just `response.ok`, or these errors are silently
+     * returned as if they were valid data.
      */
     private async request<T>(
         endpoint: string,
         options?: RequestInit,
         retryCount = 0,
+        regionRedirected = false,
     ): Promise<T> {
         const url = `${this.apiBase}${endpoint}`;
 
@@ -62,7 +77,12 @@ export class PlaudClient {
                     ? Number.parseInt(retryAfter, 10) * 1000
                     : INITIAL_RETRY_DELAY * 2 ** retryCount; // Exponential backoff
                 await sleep(delay);
-                return this.request<T>(endpoint, options, retryCount + 1);
+                return this.request<T>(
+                    endpoint,
+                    options,
+                    retryCount + 1,
+                    regionRedirected,
+                );
             }
 
             if (!response.ok) {
@@ -76,13 +96,44 @@ export class PlaudClient {
                 ) {
                     const delay = INITIAL_RETRY_DELAY * 2 ** retryCount;
                     await sleep(delay);
-                    return this.request<T>(endpoint, options, retryCount + 1);
+                    return this.request<T>(
+                        endpoint,
+                        options,
+                        retryCount + 1,
+                        regionRedirected,
+                    );
                 }
 
                 throw new Error(errorMessage);
             }
 
-            return (await response.json()) as T;
+            const data = (await response.json()) as T & {
+                status?: number;
+                msg?: string;
+                data?: { domains?: { api?: string } };
+            };
+
+            // Plaud uses HTTP 200 with a negative `status` for app-level
+            // errors. -302 means "wrong region" and carries the correct
+            // domain — follow it once, then surface any remaining error.
+            if (typeof data.status === "number" && data.status < 0) {
+                const redirectBase = data.data?.domains?.api;
+                if (
+                    data.status === -302 &&
+                    typeof redirectBase === "string" &&
+                    redirectBase !== this.apiBase &&
+                    !regionRedirected
+                ) {
+                    this.apiBase = redirectBase;
+                    return this.request<T>(endpoint, options, 0, true);
+                }
+
+                throw new Error(
+                    `Plaud API error (${data.status}): ${data.msg ?? "unknown error"}`,
+                );
+            }
+
+            return data as T;
         } catch (error) {
             if (
                 error instanceof TypeError &&
@@ -91,7 +142,12 @@ export class PlaudClient {
             ) {
                 const delay = INITIAL_RETRY_DELAY * 2 ** retryCount;
                 await sleep(delay);
-                return this.request<T>(endpoint, options, retryCount + 1);
+                return this.request<T>(
+                    endpoint,
+                    options,
+                    retryCount + 1,
+                    regionRedirected,
+                );
             }
 
             if (error instanceof Error) {
