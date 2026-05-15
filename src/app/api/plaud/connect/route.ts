@@ -43,17 +43,21 @@ export async function POST(request: Request) {
 
         const apiBase = PLAUD_SERVERS[resolvedKey as PlaudServerKey].apiBase;
         const client = new PlaudClient(bearerToken, apiBase);
-        const isValid = await client.testConnection();
 
-        if (!isValid) {
-            return NextResponse.json(
-                { error: "Invalid bearer token" },
-                { status: 400 },
-            );
+        // Validate by listing devices. This also triggers the region
+        // auto-redirect, so afterwards client.getApiBase() may differ from
+        // the picked server — we persist whatever the client ended on.
+        let deviceList: Awaited<ReturnType<typeof client.listDevices>>;
+        try {
+            deviceList = await client.listDevices();
+        } catch (error) {
+            const message =
+                error instanceof Error ? error.message : "Invalid bearer token";
+            return NextResponse.json({ error: message }, { status: 400 });
         }
-
-        const deviceList = await client.listDevices();
         console.log("Plaud device list response:", JSON.stringify(deviceList));
+
+        const resolvedApiBase = client.getApiBase();
 
         const encryptedToken = encrypt(bearerToken);
 
@@ -68,7 +72,7 @@ export async function POST(request: Request) {
                 .update(plaudConnections)
                 .set({
                     bearerToken: encryptedToken,
-                    apiBase,
+                    apiBase: resolvedApiBase,
                     updatedAt: new Date(),
                 })
                 .where(eq(plaudConnections.id, existingConnection.id));
@@ -76,7 +80,7 @@ export async function POST(request: Request) {
             await db.insert(plaudConnections).values({
                 userId: session.user.id,
                 bearerToken: encryptedToken,
-                apiBase,
+                apiBase: resolvedApiBase,
             });
         }
 

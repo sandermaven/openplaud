@@ -233,6 +233,88 @@ describe("PlaudClient", () => {
         });
     });
 
+    describe("region mismatch handling", () => {
+        it("should auto-redirect to the region domain and retry on status -302", async () => {
+            const globalClient = new PlaudClient(
+                mockBearerToken,
+                "https://api.plaud.ai",
+            );
+
+            const regionMismatch = {
+                status: -302,
+                msg: "user region mismatch",
+                data: { domains: { api: "https://api-euc1.plaud.ai" } },
+            };
+            const success = {
+                status: 0,
+                msg: "success",
+                data_devices: [],
+            };
+
+            mockFetch
+                .mockResolvedValueOnce({
+                    ok: true,
+                    json: () => Promise.resolve(regionMismatch),
+                })
+                .mockResolvedValueOnce({
+                    ok: true,
+                    json: () => Promise.resolve(success),
+                });
+
+            const result = await globalClient.listDevices();
+
+            expect(result).toEqual(success);
+            expect(mockFetch).toHaveBeenNthCalledWith(
+                1,
+                "https://api.plaud.ai/device/list",
+                expect.any(Object),
+            );
+            expect(mockFetch).toHaveBeenNthCalledWith(
+                2,
+                "https://api-euc1.plaud.ai/device/list",
+                expect.any(Object),
+            );
+            // Caller can read the corrected base to persist it
+            expect(globalClient.getApiBase()).toBe("https://api-euc1.plaud.ai");
+        });
+
+        it("should throw a clear error on a negative status with no redirect domain", async () => {
+            mockFetch.mockResolvedValueOnce({
+                ok: true,
+                json: () =>
+                    Promise.resolve({
+                        status: -401,
+                        msg: "token expired",
+                    }),
+            });
+
+            await expect(client.listDevices()).rejects.toThrow(
+                "Plaud API error (-401): token expired",
+            );
+        });
+
+        it("should not loop forever if the region domain also returns -302", async () => {
+            const globalClient = new PlaudClient(
+                mockBearerToken,
+                "https://api.plaud.ai",
+            );
+            const regionMismatch = {
+                status: -302,
+                msg: "user region mismatch",
+                data: { domains: { api: "https://api-euc1.plaud.ai" } },
+            };
+
+            mockFetch.mockResolvedValue({
+                ok: true,
+                json: () => Promise.resolve(regionMismatch),
+            });
+
+            await expect(globalClient.listDevices()).rejects.toThrow(
+                "Plaud API error (-302): user region mismatch",
+            );
+        });
+    });
+
     describe("error handling", () => {
         it("should throw error when API returns error response", async () => {
             const errorResponse = {
