@@ -339,5 +339,49 @@ describe("PlaudClient", () => {
 
             await expect(client.listDevices()).rejects.toThrow("Network error");
         });
+
+        it("should throw a readable error when the body is not JSON", async () => {
+            // Cloudflare's bot WAF blocks non-browser clients with an HTML
+            // 403 page. response.json() then throws a cryptic
+            // "Unrecognized token '<'" — surface the HTTP status instead.
+            mockFetch.mockResolvedValueOnce({
+                ok: true,
+                status: 403,
+                statusText: "Forbidden",
+                json: () =>
+                    Promise.reject(
+                        new SyntaxError(
+                            "JSON Parse error: Unrecognized token '<'",
+                        ),
+                    ),
+            });
+
+            await expect(client.listDevices()).rejects.toThrow(
+                "Plaud API returned a non-JSON response (HTTP 403)",
+            );
+        });
+    });
+
+    describe("bot-WAF evasion", () => {
+        it("should send a browser User-Agent so Cloudflare does not block it", async () => {
+            mockFetch.mockResolvedValueOnce({
+                ok: true,
+                status: 200,
+                json: () =>
+                    Promise.resolve({
+                        status: 0,
+                        msg: "success",
+                        data_devices: [],
+                    }),
+            });
+
+            await client.listDevices();
+
+            const headers = mockFetch.mock.calls[0][1].headers as Record<
+                string,
+                string
+            >;
+            expect(headers["User-Agent"]).toMatch(/Mozilla\/5\.0/);
+        });
     });
 });

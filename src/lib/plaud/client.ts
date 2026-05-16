@@ -17,6 +17,37 @@ const MAX_RETRIES = 3;
 const INITIAL_RETRY_DELAY = 1000; // 1 second
 
 /**
+ * Plaud's API sits behind Cloudflare's bot WAF, which blocks requests
+ * carrying a non-browser User-Agent (e.g. the default `Bun/x` or `undici`)
+ * with an HTML 403 page. Sending a realistic browser UA keeps requests from
+ * being silently turned into unparseable HTML.
+ */
+const BROWSER_USER_AGENT =
+    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) " +
+    "AppleWebKit/537.36 (KHTML, like Gecko) " +
+    "Chrome/124.0.0.0 Safari/537.36";
+
+/**
+ * Parse a response body as JSON, turning the cryptic
+ * "Unrecognized token '<'" SyntaxError (an HTML body, typically a
+ * Cloudflare/proxy block or error page) into a readable error that names
+ * the HTTP status.
+ */
+async function parseJsonBody<T>(response: Response): Promise<T> {
+    try {
+        return (await response.json()) as T;
+    } catch (error) {
+        if (error instanceof SyntaxError) {
+            throw new Error(
+                `Plaud API returned a non-JSON response (HTTP ${response.status}). ` +
+                    "The request was likely blocked by an upstream proxy or WAF.",
+            );
+        }
+        throw error;
+    }
+}
+
+/**
  * Sleep for specified milliseconds
  */
 function sleep(ms: number): Promise<void> {
@@ -68,6 +99,7 @@ export class PlaudClient {
                     ...options?.headers,
                     Authorization: `Bearer ${this.bearerToken}`,
                     "Content-Type": "application/json",
+                    "User-Agent": BROWSER_USER_AGENT,
                 },
             });
 
@@ -86,7 +118,7 @@ export class PlaudClient {
             }
 
             if (!response.ok) {
-                const error = (await response.json()) as PlaudApiError;
+                const error = await parseJsonBody<PlaudApiError>(response);
                 const errorMessage = `Plaud API error (${response.status}): ${error.msg || response.statusText}`;
 
                 if (
@@ -107,11 +139,13 @@ export class PlaudClient {
                 throw new Error(errorMessage);
             }
 
-            const data = (await response.json()) as T & {
-                status?: number;
-                msg?: string;
-                data?: { domains?: { api?: string } };
-            };
+            const data = await parseJsonBody<
+                T & {
+                    status?: number;
+                    msg?: string;
+                    data?: { domains?: { api?: string } };
+                }
+            >(response);
 
             // Plaud uses HTTP 200 with a negative `status` for app-level
             // errors. -302 means "wrong region" and carries the correct
