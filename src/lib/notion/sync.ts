@@ -103,7 +103,7 @@ export async function syncTranscriptionToNotion(
                 select: { name: "Plaud" },
             },
             Status: {
-                status: { name: "Inbox" },
+                select: { name: "Ruwe transcriptie" },
             },
             Duration: {
                 rich_text: [
@@ -133,7 +133,7 @@ export async function syncTranscriptionToNotion(
         const blockBatches = buildNotionPageContent({
             title: recording.filename,
             transcriptionText: txn.text,
-            recordingUrl: `https://openplaud.maven-company.com/recordings/${recording.id}`,
+            recordingUrl: `https://plaud.maven-company.com/recordings/${recording.id}`,
             duration: recording.duration,
             date: recording.startTime.toISOString(),
             language: txn.detectedLanguage ?? undefined,
