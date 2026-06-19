@@ -1,4 +1,4 @@
-import { and, eq, inArray } from "drizzle-orm";
+import { and, eq, inArray, lt, or } from "drizzle-orm";
 import { NextResponse } from "next/server";
 import { db } from "@/db";
 import { transcriptions } from "@/db/schema";
@@ -7,6 +7,10 @@ import { env } from "@/lib/env";
 import { syncTranscriptionToNotion } from "@/lib/notion/sync";
 
 const BULK_SYNC_DELAY = 500; // ms between syncs
+// A normal Notion sync finishes in seconds. If a row still says "syncing"
+// after this long, the original call was killed (cron after() timeout, process
+// restart) and the row is safe to retry.
+const STALE_SYNCING_THRESHOLD_MS = 5 * 60 * 1000;
 
 function delay(ms: number): Promise<void> {
     return new Promise((resolve) => setTimeout(resolve, ms));
@@ -33,17 +37,28 @@ export async function POST(request: Request) {
             );
         }
 
-        // Find all transcriptions needing sync
+        const staleSyncingThreshold = new Date(
+            Date.now() - STALE_SYNCING_THRESHOLD_MS,
+        );
+
+        // Find all transcriptions needing sync. Stale "syncing" rows are
+        // included so a killed cron after() doesn't strand them forever.
         const pendingTranscriptions = await db
             .select({ id: transcriptions.id })
             .from(transcriptions)
             .where(
                 and(
                     eq(transcriptions.userId, session.user.id),
-                    inArray(transcriptions.notionSyncStatus, [
-                        "pending",
-                        "failed",
-                    ]),
+                    or(
+                        inArray(transcriptions.notionSyncStatus, [
+                            "pending",
+                            "failed",
+                        ]),
+                        and(
+                            eq(transcriptions.notionSyncStatus, "syncing"),
+                            lt(transcriptions.createdAt, staleSyncingThreshold),
+                        ),
+                    ),
                 ),
             );
 
