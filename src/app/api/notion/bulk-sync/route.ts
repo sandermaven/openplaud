@@ -76,13 +76,17 @@ export async function POST(request: Request) {
         // Process sequentially with delay (fire-and-forget)
         let synced = 0;
         let failed = 0;
+        const errors: Array<{ id: string; error: string | null }> = [];
 
         for (const txn of pendingTranscriptions) {
             await syncTranscriptionToNotion(txn.id);
 
             // Check actual status after sync (syncTranscriptionToNotion catches errors internally)
             const [result] = await db
-                .select({ status: transcriptions.notionSyncStatus })
+                .select({
+                    status: transcriptions.notionSyncStatus,
+                    error: transcriptions.notionSyncError,
+                })
                 .from(transcriptions)
                 .where(eq(transcriptions.id, txn.id))
                 .limit(1);
@@ -91,6 +95,7 @@ export async function POST(request: Request) {
                 synced++;
             } else {
                 failed++;
+                errors.push({ id: txn.id, error: result?.error ?? null });
             }
             await delay(BULK_SYNC_DELAY);
         }
@@ -100,6 +105,7 @@ export async function POST(request: Request) {
             synced,
             failed,
             total,
+            errors: errors.length > 0 ? errors : undefined,
         });
     } catch (error) {
         console.error("Error in bulk Notion sync:", error);
