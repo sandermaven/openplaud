@@ -134,8 +134,11 @@ describe("Transcription", () => {
             const mockCreate = vi
                 .fn()
                 .mockRejectedValue(new Error("API Error"));
-            (OpenAI as unknown as Mock).mockReturnValue({
-                audio: { transcriptions: { create: mockCreate } },
+            // biome-ignore lint/complexity/useArrowFunction: the OpenAI mock is invoked with `new`, which an arrow function cannot be.
+            (OpenAI as unknown as Mock).mockImplementation(function () {
+                return {
+                    audio: { transcriptions: { create: mockCreate } },
+                };
             });
 
             (db.select as Mock)
@@ -190,6 +193,138 @@ describe("Transcription", () => {
 
             expect(result.success).toBe(false);
             expect(result.error).toBe("API Error");
+        });
+
+        it("skips an existing transcription unless force is set", async () => {
+            (db.select as Mock)
+                .mockReturnValueOnce({
+                    from: vi.fn().mockReturnValue({
+                        where: vi.fn().mockReturnValue({
+                            limit: vi
+                                .fn()
+                                .mockResolvedValue([
+                                    { id: mockRecordingId, filename: "t.mp3" },
+                                ]),
+                        }),
+                    }),
+                })
+                .mockReturnValueOnce({
+                    from: vi.fn().mockReturnValue({
+                        where: vi.fn().mockReturnValue({
+                            limit: vi
+                                .fn()
+                                .mockResolvedValue([
+                                    { id: "trans-1", text: "Existing text" },
+                                ]),
+                        }),
+                    }),
+                });
+
+            const result = await transcribeRecording(
+                mockUserId,
+                mockRecordingId,
+            );
+
+            expect(result.success).toBe(true);
+            expect(result.alreadyExists).toBe(true);
+        });
+
+        it("re-transcribes with a forced language override", async () => {
+            const mockCreate = vi.fn().mockResolvedValue({
+                text: "Coherente tekst",
+                language: "dutch",
+            });
+            // biome-ignore lint/complexity/useArrowFunction: the OpenAI mock is invoked with `new`, which an arrow function cannot be.
+            (OpenAI as unknown as Mock).mockImplementation(function () {
+                return {
+                    audio: { transcriptions: { create: mockCreate } },
+                };
+            });
+
+            (db.update as Mock).mockReturnValue({
+                set: vi.fn().mockReturnValue({
+                    where: vi.fn().mockResolvedValue(undefined),
+                }),
+            });
+
+            (db.select as Mock)
+                // recording
+                .mockReturnValueOnce({
+                    from: vi.fn().mockReturnValue({
+                        where: vi.fn().mockReturnValue({
+                            limit: vi.fn().mockResolvedValue([
+                                {
+                                    id: mockRecordingId,
+                                    filename: "test.mp3",
+                                    storagePath: "test.mp3",
+                                    duration: 1000,
+                                },
+                            ]),
+                        }),
+                    }),
+                })
+                // existing transcription (bad result we want to overwrite)
+                .mockReturnValueOnce({
+                    from: vi.fn().mockReturnValue({
+                        where: vi.fn().mockReturnValue({
+                            limit: vi
+                                .fn()
+                                .mockResolvedValue([
+                                    { id: "trans-1", text: "van van van" },
+                                ]),
+                        }),
+                    }),
+                })
+                // credentials
+                .mockReturnValueOnce({
+                    from: vi.fn().mockReturnValue({
+                        where: vi.fn().mockReturnValue({
+                            limit: vi.fn().mockResolvedValue([
+                                {
+                                    id: "creds-1",
+                                    provider: "openai",
+                                    apiKey: "encrypted-key",
+                                    defaultModel: "whisper-1",
+                                },
+                            ]),
+                        }),
+                    }),
+                })
+                // settings (title generation off to keep the path simple)
+                .mockReturnValueOnce({
+                    from: vi.fn().mockReturnValue({
+                        where: vi.fn().mockReturnValue({
+                            limit: vi.fn().mockResolvedValue([
+                                {
+                                    id: "settings-1",
+                                    autoGenerateTitle: false,
+                                },
+                            ]),
+                        }),
+                    }),
+                })
+                // notion sync txn lookup
+                .mockReturnValueOnce({
+                    from: vi.fn().mockReturnValue({
+                        where: vi.fn().mockReturnValue({
+                            limit: vi
+                                .fn()
+                                .mockResolvedValue([{ id: "trans-1" }]),
+                        }),
+                    }),
+                });
+
+            const result = await transcribeRecording(
+                mockUserId,
+                mockRecordingId,
+                { languageOverride: "nl", force: true },
+            );
+
+            expect(result.success).toBe(true);
+            expect(result.alreadyExists).toBeUndefined();
+            expect(mockCreate).toHaveBeenCalledWith(
+                expect.objectContaining({ language: "nl" }),
+            );
         });
     });
 });

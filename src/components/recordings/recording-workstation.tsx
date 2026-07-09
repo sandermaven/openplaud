@@ -14,7 +14,10 @@ import { useRouter } from "next/navigation";
 import { useCallback, useState } from "react";
 import { toast } from "sonner";
 import { RecordingPlayer } from "@/components/dashboard/recording-player";
-import { TranscriptionPanel } from "@/components/dashboard/transcription-panel";
+import {
+    type TranscribeOptions,
+    TranscriptionPanel,
+} from "@/components/dashboard/transcription-panel";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import type { Recording } from "@/types/recording";
@@ -119,29 +122,38 @@ export function RecordingWorkstation({
         }
     }, [recording.id]);
 
-    const handleTranscribe = useCallback(async () => {
-        setIsTranscribing(true);
-        try {
-            const response = await fetch(
-                `/api/recordings/${recording.id}/transcribe`,
-                {
-                    method: "POST",
-                },
-            );
+    const handleTranscribe = useCallback(
+        async ({ language, force }: TranscribeOptions) => {
+            setIsTranscribing(true);
+            try {
+                const response = await fetch(
+                    `/api/recordings/${recording.id}/transcribe`,
+                    {
+                        method: "POST",
+                        headers: { "Content-Type": "application/json" },
+                        body: JSON.stringify({ language, force }),
+                    },
+                );
 
-            if (response.ok) {
-                toast.success("Transcription complete");
-                router.refresh();
-            } else {
-                const error = await response.json();
-                toast.error(error.error || "Transcription failed");
+                if (response.ok) {
+                    toast.success(
+                        force
+                            ? "Transcriptie opnieuw gegenereerd"
+                            : "Transcription complete",
+                    );
+                    router.refresh();
+                } else {
+                    const error = await response.json().catch(() => ({}));
+                    toast.error(error.error || "Transcription failed");
+                }
+            } catch {
+                toast.error("Failed to transcribe recording");
+            } finally {
+                setIsTranscribing(false);
             }
-        } catch {
-            toast.error("Failed to transcribe recording");
-        } finally {
-            setIsTranscribing(false);
-        }
-    }, [recording.id, router]);
+        },
+        [recording.id, router],
+    );
 
     return (
         <div className="bg-background">
