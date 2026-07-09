@@ -47,6 +47,24 @@ function normalizeLanguage(
     return LANGUAGE_NAME_TO_CODE[lower];
 }
 
+export interface TranscribeOptions {
+    // Force a specific language (ISO-639-1 or a full name normalizeLanguage
+    // understands). null/undefined = fall back to user default, then auto-detect.
+    languageOverride?: string | null;
+    // Overwrite an existing transcription instead of skipping it.
+    force?: boolean;
+}
+
+export interface TranscribeResult {
+    success: boolean;
+    error?: string;
+    // True when a transcription already existed and force was not set.
+    alreadyExists?: boolean;
+    transcription?: string;
+    detectedLanguage?: string | null;
+    costEstimate?: number | null;
+}
+
 // Serialize all transcription work across the whole process. ffmpeg + Whisper
 // chunked transcription on a 1GB e2-micro can OOM-cascade if two loops run
 // concurrently. Each call awaits the previous; failures don't propagate.
@@ -55,7 +73,8 @@ let activeTranscription: Promise<unknown> = Promise.resolve();
 export async function transcribeRecording(
     userId: string,
     recordingId: string,
-): Promise<{ success: boolean; error?: string }> {
+    options?: TranscribeOptions,
+): Promise<TranscribeResult> {
     const previous = activeTranscription;
     let release!: () => void;
     activeTranscription = new Promise<void>((resolve) => {
@@ -64,7 +83,7 @@ export async function transcribeRecording(
 
     try {
         await previous.catch(() => undefined);
-        return await runTranscription(userId, recordingId);
+        return await runTranscription(userId, recordingId, options);
     } finally {
         release();
     }
@@ -73,7 +92,8 @@ export async function transcribeRecording(
 async function runTranscription(
     userId: string,
     recordingId: string,
-): Promise<{ success: boolean; error?: string }> {
+    options?: TranscribeOptions,
+): Promise<TranscribeResult> {
     try {
         const [recording] = await db
             .select()
@@ -96,8 +116,8 @@ async function runTranscription(
             .where(eq(transcriptions.recordingId, recordingId))
             .limit(1);
 
-        if (existingTranscription?.text) {
-            return { success: true };
+        if (existingTranscription?.text && !options?.force) {
+            return { success: true, alreadyExists: true };
         }
 
         const [credentials] = await db
@@ -121,6 +141,8 @@ async function runTranscription(
             .where(eq(userSettings.userId, userId))
             .limit(1);
 
+        // Resolution order: per-request override → user default → auto-detect.
+        const overrideLanguage = normalizeLanguage(options?.languageOverride);
         const defaultLanguage = normalizeLanguage(
             settings?.defaultTranscriptionLanguage,
         );
@@ -189,7 +211,7 @@ async function runTranscription(
 
         const transcriptionParts: string[] = [];
         let detectedLanguage: string | null = null;
-        let chunkLanguage = defaultLanguage;
+        let chunkLanguage = overrideLanguage ?? defaultLanguage;
 
         for (const chunk of chunks) {
             const audioFile = new File(
@@ -343,7 +365,12 @@ async function runTranscription(
             })
             .where(eq(recordings.id, recordingId));
 
-        return { success: true };
+        return {
+            success: true,
+            transcription: transcriptionText,
+            detectedLanguage,
+            costEstimate,
+        };
     } catch (error) {
         const message =
             error instanceof Error ? error.message : "Transcription failed";
