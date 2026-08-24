@@ -38,6 +38,8 @@ export async function GET(request: Request) {
         return NextResponse.json({
             connected: !!connection,
             server,
+            syncError: connection?.syncError ?? null,
+            syncErrorAt: connection?.syncErrorAt ?? null,
         });
     } catch (error) {
         console.error("Error checking Plaud connection:", error);
