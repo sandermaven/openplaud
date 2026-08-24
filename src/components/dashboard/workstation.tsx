@@ -4,6 +4,7 @@ import { BookOpen, Mic, RefreshCw, Settings } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useState } from "react";
 import { toast } from "sonner";
+import { PlaudConnectionBanner } from "@/components/dashboard/plaud-connection-banner";
 import { OnboardingDialog } from "@/components/onboarding-dialog";
 import { SettingsDialog } from "@/components/settings-dialog";
 import { SyncStatus } from "@/components/sync-status";
@@ -216,6 +217,7 @@ export function Workstation({
         <>
             <div className="bg-background">
                 <div className="container mx-auto px-4 py-6 max-w-7xl">
+                    <PlaudConnectionBanner />
                     <div className="flex items-center justify-between mb-6">
                         <div>
                             <h1 className="text-3xl font-bold">Recordings</h1>

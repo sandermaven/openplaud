@@ -80,6 +80,10 @@ export const plaudConnections = pgTable("plaud_connections", {
     // Regional API server base URL (e.g. https://api-euc1.plaud.ai for EU users)
     apiBase: text("api_base").notNull().default("https://api.plaud.ai"),
     lastSync: timestamp("last_sync"),
+    // Last sync failure for this connection (e.g. expired bearer token / -419).
+    // Cleared on the next successful sync. Drives the dashboard reconnect banner.
+    syncError: text("sync_error"),
+    syncErrorAt: timestamp("sync_error_at", { withTimezone: true }),
     createdAt: timestamp("created_at").notNull().defaultNow(),
     updatedAt: timestamp("updated_at").notNull().defaultNow(),
 });
