@@ -24,7 +24,11 @@ export async function POST(request: Request) {
             );
         }
 
-        const { bearerToken, server: serverKey } = await request.json();
+        const {
+            bearerToken,
+            refreshToken,
+            server: serverKey,
+        } = await request.json();
 
         if (!bearerToken) {
             return NextResponse.json(
@@ -32,6 +36,17 @@ export async function POST(request: Request) {
                 { status: 400 },
             );
         }
+
+        // Optional: the refresh token enables server-side auto-rotation of the
+        // bearer token on expiry (-419), so the connection never needs a manual
+        // reconnect. Nullable — connections without it fall back to the banner.
+        const refreshTokenValue =
+            typeof refreshToken === "string" && refreshToken.trim()
+                ? refreshToken.trim()
+                : null;
+        const encryptedRefreshToken = refreshTokenValue
+            ? encrypt(refreshTokenValue)
+            : null;
 
         const resolvedKey = (serverKey ?? DEFAULT_SERVER_KEY) as string;
         if (!Object.hasOwn(PLAUD_SERVERS, resolvedKey)) {
@@ -73,6 +88,14 @@ export async function POST(request: Request) {
                 .set({
                     bearerToken: encryptedToken,
                     apiBase: resolvedApiBase,
+                    // Only overwrite the stored refresh token when a new one is
+                    // supplied, so a bearer-only reconnect keeps auto-refresh.
+                    ...(encryptedRefreshToken
+                        ? { refreshToken: encryptedRefreshToken }
+                        : {}),
+                    // A fresh token clears any prior expiry error.
+                    syncError: null,
+                    syncErrorAt: null,
                     updatedAt: new Date(),
                 })
                 .where(eq(plaudConnections.id, existingConnection.id));
@@ -80,6 +103,7 @@ export async function POST(request: Request) {
             await db.insert(plaudConnections).values({
                 userId: session.user.id,
                 bearerToken: encryptedToken,
+                refreshToken: encryptedRefreshToken,
                 apiBase: resolvedApiBase,
             });
         }

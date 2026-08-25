@@ -75,8 +75,12 @@ export const plaudConnections = pgTable("plaud_connections", {
     userId: text("user_id")
         .notNull()
         .references(() => users.id, { onDelete: "cascade" }),
-    // Encrypted bearer token
+    // Encrypted bearer token (short-lived workspace access token, ~24h)
     bearerToken: text("bearer_token").notNull(),
+    // Encrypted refresh token (JWT typ "WRT", ~30d). Used to rotate the bearer
+    // token on -419 without a manual reconnect. Nullable: connections coupled
+    // before this existed fall back to the reconnect banner.
+    refreshToken: text("refresh_token"),
     // Regional API server base URL (e.g. https://api-euc1.plaud.ai for EU users)
     apiBase: text("api_base").notNull().default("https://api.plaud.ai"),
     lastSync: timestamp("last_sync"),

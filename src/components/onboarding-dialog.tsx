@@ -51,6 +51,7 @@ export function OnboardingDialog({
     const router = useRouter();
     const [step, setStep] = useState<OnboardingStep>("welcome");
     const [bearerToken, setBearerToken] = useState("");
+    const [refreshToken, setRefreshToken] = useState("");
     const [server, setServer] = useState<PlaudServerKey>(DEFAULT_SERVER_KEY);
     const [isLoading, setIsLoading] = useState(false);
     const [hasPlaudConnection, setHasPlaudConnection] = useState(false);
@@ -89,6 +90,7 @@ export function OnboardingDialog({
         if (!open) {
             setStep("welcome");
             setBearerToken("");
+            setRefreshToken("");
             setServer(DEFAULT_SERVER_KEY);
             setIsLoading(false);
             setHasPlaudConnection(false);
@@ -107,7 +109,11 @@ export function OnboardingDialog({
             const response = await fetch("/api/plaud/connect", {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ bearerToken, server }),
+                body: JSON.stringify({
+                    bearerToken,
+                    refreshToken: refreshToken.trim() || undefined,
+                    server,
+                }),
             });
 
             if (!response.ok) {
@@ -118,6 +124,7 @@ export function OnboardingDialog({
             toast.success("Plaud device connected");
             setHasPlaudConnection(true);
             setBearerToken("");
+            setRefreshToken("");
         } catch (error) {
             toast.error(
                 error instanceof Error
@@ -387,6 +394,32 @@ export function OnboardingDialog({
                                                 the Authorization header value
                                                 from any request to the Plaud
                                                 API server.
+                                            </p>
+                                        </div>
+                                        <div className="space-y-2">
+                                            <Label htmlFor="refresh-token">
+                                                Refresh Token (optioneel)
+                                            </Label>
+                                            <Input
+                                                id="refresh-token"
+                                                type="password"
+                                                placeholder="eyJ..."
+                                                value={refreshToken}
+                                                onChange={(e) =>
+                                                    setRefreshToken(
+                                                        e.target.value,
+                                                    )
+                                                }
+                                                disabled={isLoading}
+                                            />
+                                            <p className="text-xs text-muted-foreground">
+                                                Aanbevolen: hiermee vernieuwt de
+                                                koppeling zichzelf, zodat je
+                                                nooit meer handmatig hoeft te
+                                                herkoppelen. In localStorage op
+                                                plaud.ai onder het veld
+                                                refreshToken in de
+                                                workspaceList-entry.
                                             </p>
                                         </div>
 

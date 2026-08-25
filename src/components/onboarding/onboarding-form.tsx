@@ -26,6 +26,7 @@ type Step = "plaud" | "complete";
 export function OnboardingForm() {
     const [step, setStep] = useState<Step>("plaud");
     const [bearerToken, setBearerToken] = useState("");
+    const [refreshToken, setRefreshToken] = useState("");
     const [server, setServer] = useState<PlaudServerKey>(DEFAULT_SERVER_KEY);
     const [isLoading, setIsLoading] = useState(false);
     const router = useRouter();
@@ -41,7 +42,11 @@ export function OnboardingForm() {
             const response = await fetch("/api/plaud/connect", {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ bearerToken, server }),
+                body: JSON.stringify({
+                    bearerToken,
+                    refreshToken: refreshToken.trim() || undefined,
+                    server,
+                }),
             });
 
             if (!response.ok) throw new Error("Failed to connect");
@@ -139,6 +144,30 @@ export function OnboardingForm() {
                             disabled={isLoading}
                             className="font-mono text-sm"
                         />
+                    </div>
+
+                    <div className="space-y-2">
+                        <Label htmlFor="refreshToken">
+                            Refresh Token (optioneel)
+                        </Label>
+                        <Input
+                            id="refreshToken"
+                            type="text"
+                            placeholder="eyJ..."
+                            value={refreshToken}
+                            onChange={(e) => setRefreshToken(e.target.value)}
+                            disabled={isLoading}
+                            className="font-mono text-sm"
+                        />
+                        <p className="text-xs text-muted-foreground">
+                            Optioneel maar aanbevolen: hiermee vernieuwt de
+                            koppeling zichzelf en hoef je nooit meer handmatig
+                            te herkoppelen. Te vinden in localStorage op
+                            plaud.ai (veld{" "}
+                            <code className="font-mono">refreshToken</code> in
+                            de <code className="font-mono">workspaceList</code>
+                            -entry).
+                        </p>
                     </div>
 
                     <MetalButton

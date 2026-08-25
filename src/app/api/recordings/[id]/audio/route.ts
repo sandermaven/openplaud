@@ -164,6 +164,10 @@ export async function GET(
                 const plaudClient = await createPlaudClient(
                     connection.bearerToken,
                     connection.apiBase,
+                    {
+                        connectionId: connection.id,
+                        encryptedRefreshToken: connection.refreshToken,
+                    },
                 );
                 const tempUrlResponse = await plaudClient.getTempUrl(
                     recording.plaudFileId,
@@ -204,8 +208,7 @@ export async function GET(
                     responseHeaders["Content-Length"] = contentLength;
                 }
 
-                const contentRange =
-                    audioResponse.headers.get("content-range");
+                const contentRange = audioResponse.headers.get("content-range");
                 if (contentRange) {
                     responseHeaders["Content-Range"] = contentRange;
                 }
