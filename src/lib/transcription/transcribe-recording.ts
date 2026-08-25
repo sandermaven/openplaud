@@ -178,6 +178,10 @@ async function runTranscription(
             const plaudClient = await createPlaudClient(
                 connection.bearerToken,
                 connection.apiBase,
+                {
+                    connectionId: connection.id,
+                    encryptedRefreshToken: connection.refreshToken,
+                },
             );
             audioBuffer = await plaudClient.downloadRecording(
                 recording.plaudFileId,
@@ -313,6 +317,11 @@ async function runTranscription(
                                 const plaudClient = await createPlaudClient(
                                     connection.bearerToken,
                                     connection.apiBase,
+                                    {
+                                        connectionId: connection.id,
+                                        encryptedRefreshToken:
+                                            connection.refreshToken,
+                                    },
                                 );
                                 await plaudClient.updateFilename(
                                     recording.plaudFileId,
