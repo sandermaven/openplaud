@@ -134,6 +134,17 @@ export function useAutoSync(options: UseAutoSyncOptions = {}) {
                         router.refresh();
                     }
 
+                    // Auto-transcription runs server-side AFTER this response
+                    // (Next.js `after`), so its results aren't in the snapshot
+                    // we just refreshed, and it also fires for older untranscribed
+                    // recordings where newRecordings is 0. Refresh again once the
+                    // background work has had time to land, otherwise the panel
+                    // stays stuck on "No transcription available" until an
+                    // unrelated reload.
+                    if (result.pendingTranscriptions > 0) {
+                        window.setTimeout(() => router.refresh(), 20_000);
+                    }
+
                     if (result.newRecordings > 0) {
                         onSuccessRef.current?.(result.newRecordings);
                     } else if (!silent) {

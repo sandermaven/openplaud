@@ -227,6 +227,10 @@ describe("Transcription", () => {
 
             expect(result.success).toBe(true);
             expect(result.alreadyExists).toBe(true);
+            // The existing transcription must be returned so a client whose
+            // server-rendered snapshot went stale can display it instead of
+            // getting stuck on "No transcription available".
+            expect(result.transcription).toBe("Existing text");
         });
 
         it("re-transcribes with a forced language override", async () => {
