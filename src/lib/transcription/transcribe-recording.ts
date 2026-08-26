@@ -117,7 +117,17 @@ async function runTranscription(
             .limit(1);
 
         if (existingTranscription?.text && !options?.force) {
-            return { success: true, alreadyExists: true };
+            // Return the existing transcription (not just a flag) so a caller
+            // whose server-rendered snapshot went stale can display it. Without
+            // this the UI shows "No transcription available" while the row
+            // exists, and clicking Transcribe just dead-ends on a conflict.
+            return {
+                success: true,
+                alreadyExists: true,
+                transcription: existingTranscription.text,
+                detectedLanguage: existingTranscription.detectedLanguage,
+                costEstimate: existingTranscription.costEstimate,
+            };
         }
 
         const [credentials] = await db

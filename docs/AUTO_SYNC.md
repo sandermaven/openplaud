@@ -276,6 +276,31 @@ Monitor sync health by tracking:
 3. **Check network**: Ensure connectivity to Plaud API
 4. **Database**: Verify recordings are being saved correctly
 
+### "No transcription available" while a transcription actually exists
+
+Auto-transcription is created **out-of-band**, not during the request the user is
+watching:
+
+- `POST /api/plaud/sync` responds first, then transcribes pending recordings in a
+  Next.js `after()` block (after the response is sent).
+- `syncRecordingsForUser` queues **all** untranscribed recordings for a user with
+  `auto_transcribe` on, so results also appear for recordings synced long ago,
+  where `newRecordings === 0`.
+
+The dashboard is server-rendered once and holds a fixed `transcriptions` snapshot.
+If it only re-fetched on `newRecordings > 0`, a transcription could exist
+server-side while the panel showed "No transcription available", and clicking
+Transcribe dead-ended on a 409.
+
+Reconciliation invariant (do not regress): the client must pick up
+transcriptions it did not trigger. Current mechanisms:
+
+- `transcribeRecording` returns the existing transcription when one is present,
+  and the transcribe route returns it as **200** (not 409), so a stale client
+  recovers on click.
+- `useAutoSync` schedules a delayed `router.refresh()` when a sync reports
+  `pendingTranscriptions > 0`, so background results land without a manual reload.
+
 ## Future Enhancements
 
 Potential improvements to the auto-sync system:

@@ -20,7 +20,10 @@ import { getSyncSettings, SYNC_CONFIG } from "@/lib/sync-config";
 import type { Recording } from "@/types/recording";
 import { RecordingList } from "./recording-list";
 import { RecordingPlayer } from "./recording-player";
-import { TranscriptionPanel } from "./transcription-panel";
+import {
+    type TranscribeOptions,
+    TranscriptionPanel,
+} from "./transcription-panel";
 
 interface TranscriptionData {
     text?: string;
@@ -187,31 +190,40 @@ export function Workstation({
         [router],
     );
 
-    const handleTranscribe = useCallback(async () => {
-        if (!currentRecording) return;
+    const handleTranscribe = useCallback(
+        async ({ language, force }: TranscribeOptions) => {
+            if (!currentRecording) return;
 
-        setIsTranscribing(true);
-        try {
-            const response = await fetch(
-                `/api/recordings/${currentRecording.id}/transcribe`,
-                {
-                    method: "POST",
-                },
-            );
+            setIsTranscribing(true);
+            try {
+                const response = await fetch(
+                    `/api/recordings/${currentRecording.id}/transcribe`,
+                    {
+                        method: "POST",
+                        headers: { "Content-Type": "application/json" },
+                        body: JSON.stringify({ language, force }),
+                    },
+                );
 
-            if (response.ok) {
-                toast.success("Transcription complete");
-                router.refresh();
-            } else {
-                const error = await response.json();
-                toast.error(error.error || "Transcription failed");
+                if (response.ok) {
+                    toast.success(
+                        force
+                            ? "Transcriptie opnieuw gegenereerd"
+                            : "Transcription complete",
+                    );
+                    router.refresh();
+                } else {
+                    const error = await response.json().catch(() => ({}));
+                    toast.error(error.error || "Transcription failed");
+                }
+            } catch {
+                toast.error("Failed to transcribe recording");
+            } finally {
+                setIsTranscribing(false);
             }
-        } catch {
-            toast.error("Failed to transcribe recording");
-        } finally {
-            setIsTranscribing(false);
-        }
-    }, [currentRecording, router]);
+        },
+        [currentRecording, router],
+    );
 
     return (
         <>
