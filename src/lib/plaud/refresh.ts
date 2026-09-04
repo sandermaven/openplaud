@@ -94,6 +94,27 @@ export async function refreshWorkspaceToken(
     }
 
     const data = (await response.json()) as Record<string, unknown>;
+
+    // Plaud signals app-level failure with a non-zero `status` (outer envelope
+    // and/or the nested `data`) even on HTTP 200. Treat that as a failed
+    // refresh so the caller falls back to the -419/reconnect-banner flow
+    // instead of mistaking an error body for a fresh token.
+    const nestedData =
+        typeof data.data === "object" && data.data !== null
+            ? (data.data as Record<string, unknown>)
+            : {};
+    const outerStatus = typeof data.status === "number" ? data.status : null;
+    const innerStatus =
+        typeof nestedData.status === "number" ? nestedData.status : null;
+    if (
+        (outerStatus !== null && outerStatus !== 0) ||
+        (innerStatus !== null && innerStatus !== 0)
+    ) {
+        throw new Error(
+            `Plaud token refresh returned status ${outerStatus ?? innerStatus}`,
+        );
+    }
+
     const accessToken = pickString(data, [
         "access_token",
         "accessToken",
