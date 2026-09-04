@@ -1,11 +1,14 @@
 import { eq } from "drizzle-orm";
-import { after, NextResponse } from "next/server";
+import { NextResponse } from "next/server";
 import { db } from "@/db";
 import { plaudConnections, userSettings, users } from "@/db/schema";
 import { env } from "@/lib/env";
 import { sendEmail } from "@/lib/notifications/email";
 import { syncRecordingsForUser } from "@/lib/sync/sync-recordings";
-import { transcribeRecording } from "@/lib/transcription/transcribe-recording";
+import {
+    enqueueTranscription,
+    getTranscriptionJobState,
+} from "@/lib/transcription/queue";
 
 export const maxDuration = 300; // 5 minutes
 
@@ -187,35 +190,30 @@ export async function GET(request: Request) {
         }
     }
 
-    // Transcribe pending recordings after the response is sent. Cleanup is
-    // owned by /api/cron/cleanup (daily) — do NOT inline it here, otherwise
-    // the destructive row-delete runs every 15 minutes and re-triggers the
-    // Plaud-resync-then-retranscribe loop.
-    after(async () => {
-        if (allPendingTranscriptions.length > 0) {
-            console.log(
-                `[cron-sync] Starting transcription for ${allPendingTranscriptions.length} recording(s)`,
-            );
-            for (const { userId, recordingId } of allPendingTranscriptions) {
-                const res = await transcribeRecording(userId, recordingId);
-                if (!res.success) {
-                    console.error(
-                        `[cron-sync] Transcription failed for ${recordingId}: ${res.error}`,
-                    );
-                } else {
-                    console.log(
-                        `[cron-sync] Transcription completed ${recordingId}`,
-                    );
-                }
-            }
-        }
-    });
+    // Hand pending work to the background queue, which dedupes on recording id
+    // and runs one job at a time. Every sync re-reports *all* untranscribed
+    // recordings, so without that dedupe each cron run would stack another copy
+    // of the same backlog. Cleanup is owned by /api/cron/cleanup (daily) — do
+    // NOT inline it here, otherwise the destructive row-delete runs every 15
+    // minutes and re-triggers the Plaud-resync-then-retranscribe loop.
+    let queued = 0;
+    for (const { userId, recordingId } of allPendingTranscriptions) {
+        const before = getTranscriptionJobState(recordingId).status;
+        enqueueTranscription(userId, recordingId);
+        if (before === "idle") queued++;
+    }
+    if (queued > 0) {
+        console.log(
+            `[cron-sync] Queued ${queued} of ${allPendingTranscriptions.length} pending recording(s)`,
+        );
+    }
 
     return NextResponse.json({
         success: true,
         usersProcessed: results.length,
         totalNewRecordings: results.reduce((s, r) => s + r.newRecordings, 0),
         totalPendingTranscriptions: allPendingTranscriptions.length,
+        queuedTranscriptions: queued,
         results,
     });
 }

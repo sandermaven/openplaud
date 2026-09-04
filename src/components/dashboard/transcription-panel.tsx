@@ -44,6 +44,11 @@ interface TranscriptionPanelProps {
     recording: Recording;
     transcription?: Transcription;
     isTranscribing: boolean;
+    /**
+     * Place in the server-side queue while waiting, 0 once this recording is
+     * the one actually being transcribed. Only meaningful when isTranscribing.
+     */
+    queuePosition?: number;
     onTranscribe: (options: TranscribeOptions) => void;
 }
 
@@ -58,12 +63,16 @@ export function TranscriptionPanel({
     recording: _recording,
     transcription,
     isTranscribing,
+    queuePosition = 0,
     onTranscribe,
 }: TranscriptionPanelProps) {
     const [language, setLanguage] = useState("auto");
     const [confirmOpen, setConfirmOpen] = useState(false);
 
     const hasTranscription = !!transcription?.text;
+    // Position 1 means "next up"; the worker picks it up within a tick, so
+    // there's nothing useful to say about waiting.
+    const isQueued = isTranscribing && queuePosition > 1;
 
     const apiLanguage = () => (language === "auto" ? null : language);
 
@@ -124,7 +133,9 @@ export function TranscriptionPanel({
                             {isTranscribing ? (
                                 <>
                                     <Sparkles className="w-4 h-4 mr-2 animate-pulse" />
-                                    Transcribing...
+                                    {isQueued
+                                        ? `In wachtrij (${queuePosition})`
+                                        : "Transcriberen..."}
                                 </>
                             ) : hasTranscription ? (
                                 <>
@@ -146,7 +157,9 @@ export function TranscriptionPanel({
                     <div className="flex flex-col items-center justify-center py-12">
                         <div className="animate-spin w-8 h-8 border-2 border-primary border-t-transparent rounded-full mb-4" />
                         <p className="text-sm text-muted-foreground">
-                            Transcribing audio...
+                            {isQueued
+                                ? `In de wachtrij: ${queuePosition - 1} opname${queuePosition === 2 ? "" : "s"} gaan voor.`
+                                : "Bezig met transcriberen. Dit kan bij een lange opname tientallen minuten duren; je kunt dit venster sluiten."}
                         </p>
                     </div>
                 ) : transcription?.text ? (

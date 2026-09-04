@@ -1,9 +1,8 @@
-import { after } from "next/server";
 import { NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
 import { AppError, createErrorResponse, ErrorCode } from "@/lib/errors";
 import { syncRecordingsForUser } from "@/lib/sync/sync-recordings";
-import { transcribeRecording } from "@/lib/transcription/transcribe-recording";
+import { enqueueTranscriptions } from "@/lib/transcription/queue";
 
 export async function POST(request: Request) {
     try {
@@ -25,27 +24,18 @@ export async function POST(request: Request) {
 
         const result = await syncRecordingsForUser(session.user.id);
 
-        // Run transcription after the response is sent, guaranteed by Next.js
-        if (result.pendingTranscriptionIds.length > 0) {
-            const userId = session.user.id;
-            const ids = result.pendingTranscriptionIds;
-            after(async () => {
-                console.log(
-                    `[auto-transcribe] Starting transcription for ${ids.length} recording(s)`,
-                );
-                for (const recordingId of ids) {
-                    const res = await transcribeRecording(userId, recordingId);
-                    if (!res.success) {
-                        console.error(
-                            `[auto-transcribe] Failed for ${recordingId}: ${res.error}`,
-                        );
-                    } else {
-                        console.log(
-                            `[auto-transcribe] Completed ${recordingId}`,
-                        );
-                    }
-                }
-            });
+        // Hand the work to the background queue and answer now. The queue
+        // dedupes on recording id, so the recordings this sync re-reports as
+        // pending (it returns *all* untranscribed ones, every time) don't pile
+        // up behind each other on the next sync five minutes from now.
+        const added = enqueueTranscriptions(
+            session.user.id,
+            result.pendingTranscriptionIds,
+        );
+        if (added > 0) {
+            console.log(
+                `[auto-transcribe] Queued ${added} of ${result.pendingTranscriptionIds.length} pending recording(s)`,
+            );
         }
 
         return NextResponse.json({
@@ -53,6 +43,7 @@ export async function POST(request: Request) {
             newRecordings: result.newRecordings,
             updatedRecordings: result.updatedRecordings,
             pendingTranscriptions: result.pendingTranscriptionIds.length,
+            queuedTranscriptions: added,
             errors: result.errors,
         });
     } catch (error) {

@@ -35,35 +35,62 @@ This is safe **only** because the two Maven users use separate Plaud accounts
 constraint to a composite unique `(user_id, plaud_file_id)` and scope the sync
 lookup by `user_id`.
 
-## Auto-transcription is out-of-band — snapshots go stale
+## Transcription runs on a background queue
 
-Transcriptions are **not** created during the request the user is watching:
+Transcriptions are **not** created during the request the user is watching.
+Everything goes through `src/lib/transcription/queue.ts`:
 
-- `POST /api/plaud/sync` runs the sync, responds immediately, then transcribes
-  pending recordings inside a Next.js `after()` block — i.e. **after** the
-  response is sent (`src/app/api/plaud/sync/route.ts`).
-- `POST /api/cron/sync` does the same on a schedule, with no browser involved.
-- `syncRecordingsForUser` queues **all** untranscribed recordings for a user with
-  `auto_transcribe` on, not just newly-synced ones — so transcriptions appear for
-  recordings that were synced days ago, with `newRecordings === 0`.
+- `enqueueTranscription` / `enqueueTranscriptions` add work and return
+  immediately. `POST /api/plaud/sync`, `GET /api/cron/sync` and
+  `POST /api/recordings/[id]/transcribe` all use them.
+- One worker runs one job at a time. ffmpeg + Whisper on a 1GB e2-micro
+  OOM-cascades if two run concurrently, so **never** call `transcribeRecording`
+  straight from a request handler; it has no concurrency guard of its own.
+- The queue **dedupes on `recordingId`**. This matters because
+  `syncRecordingsForUser` returns *all* untranscribed recordings for a user with
+  `auto_transcribe` on, every single sync (browser every 5 minutes, plus cron).
+  Without dedupe each sync stacked another copy of the same backlog, the queue
+  grew faster than it drained, and a user-triggered job ended up behind hours of
+  duplicates. A forced re-transcribe is merged into a pending job rather than
+  dropped, so it can't be swallowed by an earlier auto run.
+- User-triggered runs are queued with `priority: true` and jump the background
+  backlog. Without that a click still landed behind dozens of auto-transcribe
+  jobs, which is the same "it hangs" from the user's side.
+- Queue state is **in-memory on purpose**. A restart wipes it and the status
+  endpoint then honestly reports `idle`; a database column would be stuck on
+  "running" forever after a crash.
+- A job that outruns `JOB_TIMEOUT_MS` (45 min) is abandoned so it can't wedge the
+  worker. ffmpeg/ffprobe get their own 10-minute `execFile` timeout and the
+  OpenAI client a 10-minute per-chunk timeout.
 
-The dashboard (`dashboard/page.tsx` → `Workstation`) is server-rendered once and
-holds a fixed `transcriptions` map prop. Because the transcription is written out
-of band and the client only re-fetched on `newRecordings > 0`, a transcription
-could exist server-side while the panel still shows **"No transcription
-available"**. Clicking Transcribe then hit a 409 and left the user stuck.
-
-**Fixes in place (keep them):**
-- `transcribeRecording` returns the existing transcription (not just an
-  `alreadyExists` flag) when one is already present, and the transcribe route
-  returns it as **200** instead of 409 — so a stale client recovers on click
-  (`src/lib/transcription/transcribe-recording.ts`, `.../transcribe/route.ts`).
+**How the UI stays in sync (keep this):**
+- `POST .../transcribe` answers **202** with `{ status, position, queueLength }`;
+  it never waits for the transcription. An 80-minute recording takes tens of
+  minutes here, and holding the request open left the panel spinning forever with
+  no way to tell a slow job from a dead one.
+- `GET .../transcribe` reports `{ status: idle|queued|running, position, error,
+  transcription }`. `Workstation` polls it every 5s while a job is live, and asks
+  once whenever the selected recording changes — that's what lets a reload adopt
+  a job that's already running.
+- If a transcription already exists and `force` isn't set, `POST` returns **200**
+  with the existing text instead of queueing, so a client whose server-rendered
+  snapshot went stale recovers on click.
 - `useAutoSync` schedules a delayed `router.refresh()` when a sync reports
-  `pendingTranscriptions > 0`, so background results land without a manual reload
-  (`src/hooks/use-auto-sync.ts`).
+  `queuedTranscriptions > 0`, for the rest of the list (the selected recording
+  has its own polling).
 
 If you change sync/transcription, preserve the invariant: **the client must
-reconcile with server-side transcriptions it did not trigger.**
+reconcile with server-side transcriptions it did not trigger**, and nothing may
+await a transcription inside a request handler.
+
+## Recording filenames are titles, not paths
+
+`recordings.filename` is overwritten with the AI-generated title after a
+successful transcription, so on any later run it usually has **no extension** and
+may contain spaces, accents or slashes. `compress-audio.ts` routes every name
+through `toMp3Name()` for this reason: Whisper rejects an extension-less upload
+with "Invalid file format", and a name containing `/` used to push ffmpeg's temp
+file outside its `mkdtemp` directory.
 
 ## Known issue: duplicate transcription rows
 

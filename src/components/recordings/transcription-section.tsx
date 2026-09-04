@@ -1,10 +1,9 @@
 "use client";
 
-import { useState } from "react";
-import { toast } from "sonner";
 import { LEDIndicator } from "@/components/led-indicator";
 import { MetalButton } from "@/components/metal-button";
 import { Panel } from "@/components/panel";
+import { useTranscriptionJob } from "@/hooks/use-transcription-job";
 
 interface TranscriptionSectionProps {
     recordingId: string;
@@ -19,46 +18,17 @@ export function TranscriptionSection({
     initialLanguage,
     initialType,
 }: TranscriptionSectionProps) {
-    const [transcription, setTranscription] = useState(initialTranscription);
-    const [detectedLanguage, setDetectedLanguage] = useState(initialLanguage);
-    const [transcriptionType, setTranscriptionType] = useState(initialType);
-    const [isProcessing, setIsProcessing] = useState(false);
+    // Transcription is queued server-side; the hook polls for the result and
+    // refreshes the route, which is what re-renders these props.
+    const { isTranscribing, queuePosition, startTranscription } =
+        useTranscriptionJob(recordingId);
 
-    const handleTranscribe = async () => {
-        setIsProcessing(true);
-        try {
-            const response = await fetch(
-                `/api/recordings/${recordingId}/transcribe`,
-                {
-                    method: "POST",
-                },
-            );
+    const transcription = initialTranscription;
+    const detectedLanguage = initialLanguage;
+    const transcriptionType = initialType;
 
-            if (!response.ok) {
-                const errorData = await response.json();
-                if (
-                    response.status === 400 &&
-                    errorData.error?.includes("No transcription API")
-                ) {
-                    toast.error(
-                        "Please configure an AI provider in Settings first",
-                    );
-                } else {
-                    toast.error(errorData.error || "Transcription failed");
-                }
-                return;
-            }
-
-            const data = await response.json();
-            setTranscription(data.transcription);
-            setDetectedLanguage(data.detectedLanguage);
-            setTranscriptionType("server");
-            toast.success("Transcription complete");
-        } catch {
-            toast.error("Transcription failed. Please try again.");
-        } finally {
-            setIsProcessing(false);
-        }
+    const handleTranscribe = () => {
+        void startTranscription({ language: null, force: !!transcription });
     };
 
     return (
@@ -91,11 +61,13 @@ export function TranscriptionSection({
                     <MetalButton
                         onClick={handleTranscribe}
                         variant="cyan"
-                        disabled={isProcessing}
+                        disabled={isTranscribing}
                         className="w-full md:w-auto"
                     >
-                        {isProcessing
-                            ? "Processing..."
+                        {isTranscribing
+                            ? queuePosition > 1
+                                ? `In wachtrij (${queuePosition})`
+                                : "Processing..."
                             : transcription
                               ? "Re-transcribe"
                               : "Transcribe"}

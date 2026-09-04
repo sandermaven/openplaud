@@ -47,6 +47,9 @@ function normalizeLanguage(
     return LANGUAGE_NAME_TO_CODE[lower];
 }
 
+/** Upload + transcribe budget for one 30-minute chunk. */
+const CHUNK_REQUEST_TIMEOUT_MS = 10 * 60 * 1000;
+
 export interface TranscribeOptions {
     // Force a specific language (ISO-639-1 or a full name normalizeLanguage
     // understands). null/undefined = fall back to user default, then auto-detect.
@@ -65,31 +68,16 @@ export interface TranscribeResult {
     costEstimate?: number | null;
 }
 
-// Serialize all transcription work across the whole process. ffmpeg + Whisper
-// chunked transcription on a 1GB e2-micro can OOM-cascade if two loops run
-// concurrently. Each call awaits the previous; failures don't propagate.
-let activeTranscription: Promise<unknown> = Promise.resolve();
-
+/**
+ * Transcribe one recording. Runs the work inline, so it can take tens of
+ * minutes for a long file.
+ *
+ * Do NOT call this from a request handler: go through `enqueueTranscription`
+ * (see ./queue.ts). ffmpeg + Whisper on a 1GB e2-micro OOM-cascades when two
+ * of these run at once, and the queue is what keeps it to one at a time — this
+ * function has no concurrency guard of its own.
+ */
 export async function transcribeRecording(
-    userId: string,
-    recordingId: string,
-    options?: TranscribeOptions,
-): Promise<TranscribeResult> {
-    const previous = activeTranscription;
-    let release!: () => void;
-    activeTranscription = new Promise<void>((resolve) => {
-        release = resolve;
-    });
-
-    try {
-        await previous.catch(() => undefined);
-        return await runTranscription(userId, recordingId, options);
-    } finally {
-        release();
-    }
-}
-
-async function runTranscription(
     userId: string,
     recordingId: string,
     options?: TranscribeOptions,
@@ -166,6 +154,10 @@ async function runTranscription(
         const openai = new OpenAI({
             apiKey,
             baseURL: credentials.baseUrl || undefined,
+            // Cap a single chunk upload. Without this a stalled connection can
+            // hold the queue's only worker for as long as the socket stays open.
+            timeout: CHUNK_REQUEST_TIMEOUT_MS,
+            maxRetries: 2,
         });
 
         const storage = await createUserStorageProvider(userId);

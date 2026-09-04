@@ -11,6 +11,7 @@ import { SyncStatus } from "@/components/sync-status";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { useAutoSync } from "@/hooks/use-auto-sync";
+import { useTranscriptionJob } from "@/hooks/use-transcription-job";
 import {
     requestNotificationPermission,
     showNewRecordingNotification,
@@ -46,7 +47,8 @@ export function Workstation({
     const [currentRecording, setCurrentRecording] = useState<Recording | null>(
         recordings.length > 0 ? recordings[0] : null,
     );
-    const [isTranscribing, setIsTranscribing] = useState(false);
+    const { isTranscribing, queuePosition, startTranscription } =
+        useTranscriptionJob(currentRecording?.id);
     const [settingsOpen, setSettingsOpen] = useState(false);
     const [onboardingOpen, setOnboardingOpen] = useState(false);
     const [providers, setProviders] = useState<
@@ -191,38 +193,10 @@ export function Workstation({
     );
 
     const handleTranscribe = useCallback(
-        async ({ language, force }: TranscribeOptions) => {
-            if (!currentRecording) return;
-
-            setIsTranscribing(true);
-            try {
-                const response = await fetch(
-                    `/api/recordings/${currentRecording.id}/transcribe`,
-                    {
-                        method: "POST",
-                        headers: { "Content-Type": "application/json" },
-                        body: JSON.stringify({ language, force }),
-                    },
-                );
-
-                if (response.ok) {
-                    toast.success(
-                        force
-                            ? "Transcriptie opnieuw gegenereerd"
-                            : "Transcription complete",
-                    );
-                    router.refresh();
-                } else {
-                    const error = await response.json().catch(() => ({}));
-                    toast.error(error.error || "Transcription failed");
-                }
-            } catch {
-                toast.error("Failed to transcribe recording");
-            } finally {
-                setIsTranscribing(false);
-            }
+        (options: TranscribeOptions) => {
+            void startTranscription(options);
         },
-        [currentRecording, router],
+        [startTranscription],
     );
 
     return (
@@ -354,6 +328,7 @@ export function Workstation({
                                             recording={currentRecording}
                                             transcription={currentTranscription}
                                             isTranscribing={isTranscribing}
+                                            queuePosition={queuePosition}
                                             onTranscribe={handleTranscribe}
                                         />
                                     </>
