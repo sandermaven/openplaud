@@ -2,14 +2,18 @@
 
 import { BookOpen, Mic, RefreshCw, Settings } from "lucide-react";
 import { useRouter } from "next/navigation";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
 import { PlaudConnectionBanner } from "@/components/dashboard/plaud-connection-banner";
+import {
+    type NotionSyncState,
+    NotionSyncStatus,
+} from "@/components/notion/notion-sync-status";
 import { OnboardingDialog } from "@/components/onboarding-dialog";
 import { SettingsDialog } from "@/components/settings-dialog";
 import { SyncStatus } from "@/components/sync-status";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent } from "@/components/ui/card";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { useAutoSync } from "@/hooks/use-auto-sync";
 import {
     requestNotificationPermission,
@@ -34,13 +38,15 @@ interface TranscriptionData {
 interface WorkstationProps {
     recordings: Recording[];
     transcriptions: Map<string, TranscriptionData>;
-    notionSyncStatuses?: Map<string, string>;
+    notionStates?: Map<string, NotionSyncState>;
+    notionConfigured?: boolean;
 }
 
 export function Workstation({
     recordings,
     transcriptions,
-    notionSyncStatuses,
+    notionStates,
+    notionConfigured = false,
 }: WorkstationProps) {
     const router = useRouter();
     const [currentRecording, setCurrentRecording] = useState<Recording | null>(
@@ -70,7 +76,30 @@ export function Workstation({
     const [notificationPrefs, setNotificationPrefs] = useState<{
         browserNotifications: boolean;
     } | null>(null);
-    const [notionConfigured, setNotionConfigured] = useState(false);
+    // Notion syncs resolve after this page was server-rendered, so keep the
+    // results of syncs started here on top of the server-rendered map.
+    const [notionOverrides, setNotionOverrides] = useState<
+        Map<string, NotionSyncState>
+    >(() => new Map());
+
+    const handleNotionStateChange = useCallback(
+        (recordingId: string, state: NotionSyncState) => {
+            setNotionOverrides((prev) => {
+                const next = new Map(prev);
+                next.set(recordingId, state);
+                return next;
+            });
+        },
+        [],
+    );
+
+    const resolvedNotionStates = useMemo(() => {
+        const merged = new Map(notionStates ?? []);
+        for (const [id, state] of notionOverrides) {
+            merged.set(id, state);
+        }
+        return merged;
+    }, [notionStates, notionOverrides]);
 
     const currentTranscription = currentRecording
         ? transcriptions.get(currentRecording.id)
@@ -95,15 +124,6 @@ export function Workstation({
         };
 
         fetchNotificationPrefs();
-    }, []);
-
-    useEffect(() => {
-        fetch("/api/settings/notion")
-            .then((res) => res.json())
-            .then((data) => {
-                setNotionConfigured(!!data.config?.enabled);
-            })
-            .catch(() => {});
     }, []);
 
     useEffect(() => {
@@ -320,7 +340,7 @@ export function Workstation({
                                     recordings={recordings}
                                     currentRecording={currentRecording}
                                     onSelect={setCurrentRecording}
-                                    notionSyncStatuses={notionSyncStatuses}
+                                    notionStates={resolvedNotionStates}
                                 />
                             </div>
 
@@ -356,6 +376,32 @@ export function Workstation({
                                             isTranscribing={isTranscribing}
                                             onTranscribe={handleTranscribe}
                                         />
+                                        {currentTranscription?.text && (
+                                            <Card>
+                                                <CardHeader className="pb-3">
+                                                    <CardTitle className="text-base flex items-center gap-2">
+                                                        <BookOpen className="w-4 h-4" />
+                                                        Notion
+                                                    </CardTitle>
+                                                </CardHeader>
+                                                <CardContent>
+                                                    <NotionSyncStatus
+                                                        recordingId={
+                                                            currentRecording.id
+                                                        }
+                                                        notionConfigured={
+                                                            notionConfigured
+                                                        }
+                                                        initialState={resolvedNotionStates.get(
+                                                            currentRecording.id,
+                                                        )}
+                                                        onStateChange={
+                                                            handleNotionStateChange
+                                                        }
+                                                    />
+                                                </CardContent>
+                                            </Card>
+                                        )}
                                     </>
                                 ) : (
                                     <Card>

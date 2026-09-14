@@ -1,8 +1,10 @@
 import { desc, eq } from "drizzle-orm";
 import { Workstation } from "@/components/dashboard/workstation";
+import type { NotionSyncState } from "@/components/notion/notion-sync-status";
 import { db } from "@/db";
 import { recordings, transcriptions } from "@/db/schema";
 import { requireAuth } from "@/lib/auth-server";
+import { getNotionConfig } from "@/lib/notion/config";
 import { serializeRecording } from "@/types/recording";
 
 export default async function DashboardPage() {
@@ -27,6 +29,8 @@ export default async function DashboardPage() {
             text: transcriptions.text,
             language: transcriptions.detectedLanguage,
             notionSyncStatus: transcriptions.notionSyncStatus,
+            notionPageUrl: transcriptions.notionPageUrl,
+            notionSyncError: transcriptions.notionSyncError,
             costEstimate: transcriptions.costEstimate,
         })
         .from(transcriptions)
@@ -45,17 +49,27 @@ export default async function DashboardPage() {
         ]),
     );
 
-    const notionSyncStatuses = new Map(
-        userTranscriptions
-            .filter((t) => t.notionSyncStatus)
-            .map((t) => [t.recordingId, t.notionSyncStatus as string]),
+    const notionStates = new Map<string, NotionSyncState>(
+        userTranscriptions.map((t) => [
+            t.recordingId,
+            {
+                status: t.notionSyncStatus,
+                pageUrl: t.notionPageUrl,
+                error: t.notionSyncError,
+            },
+        ]),
     );
+
+    // Resolved server-side (DB → env fallback) so the panel doesn't flash
+    // "not configured" while a client fetch is in flight.
+    const notionCfg = await getNotionConfig(session.user.id);
 
     return (
         <Workstation
             recordings={recordingsData}
             transcriptions={transcriptionMap}
-            notionSyncStatuses={notionSyncStatuses}
+            notionStates={notionStates}
+            notionConfigured={!!notionCfg?.enabled}
         />
     );
 }
