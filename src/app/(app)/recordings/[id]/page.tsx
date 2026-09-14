@@ -53,15 +53,14 @@ export default async function RecordingDetailPage({
                           detectedLanguage:
                               transcription.detectedLanguage || undefined,
                           transcriptionType: transcription.transcriptionType,
-                          costEstimate:
-                              transcription.costEstimate ?? undefined,
+                          costEstimate: transcription.costEstimate ?? undefined,
                       }
                     : undefined
             }
             notionSyncStatus={transcription?.notionSyncStatus}
             notionPageUrl={transcription?.notionPageUrl}
             notionSyncError={transcription?.notionSyncError}
-            notionConfigured={!!notionCfg}
+            notionConfigured={!!notionCfg?.enabled}
         />
     );
 }

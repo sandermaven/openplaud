@@ -2,6 +2,7 @@
 
 import { BookOpen, Clock, HardDrive, Play } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
+import type { NotionSyncState } from "@/components/notion/notion-sync-status";
 import { Card, CardContent } from "@/components/ui/card";
 import { formatDateTime } from "@/lib/format-date";
 import { cn } from "@/lib/utils";
@@ -12,14 +13,14 @@ interface RecordingListProps {
     recordings: Recording[];
     currentRecording: Recording | null;
     onSelect: (recording: Recording) => void;
-    notionSyncStatuses?: Map<string, string>;
+    notionStates?: Map<string, NotionSyncState>;
 }
 
 export function RecordingList({
     recordings,
     currentRecording,
     onSelect,
-    notionSyncStatuses,
+    notionStates,
 }: RecordingListProps) {
     const [dateTimeFormat, setDateTimeFormat] =
         useState<DateTimeFormat>("relative");
@@ -84,9 +85,9 @@ export function RecordingList({
                     {sortedAndPaginatedRecordings.map((recording) => {
                         const isSelected =
                             currentRecording?.id === recording.id;
-                        const notionStatus = notionSyncStatuses?.get(
+                        const notionStatus = notionStates?.get(
                             recording.id,
-                        );
+                        )?.status;
                         return (
                             <button
                                 key={recording.id}
