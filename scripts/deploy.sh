@@ -50,12 +50,20 @@ if [ -n "$(git status --porcelain --untracked-files=no)" ]; then
 fi
 
 current="$(git rev-parse HEAD)"
+# Lives in .git so `git reset --hard` never touches it and it is owned by the
+# same user as the checkout.
+state_file="$APP_DIR/.git/openplaud-deployed-sha"
+deployed="$(cat "$state_file" 2>/dev/null || true)"
 
 git fetch --prune origin
 target="$(git rev-parse "origin/$DEPLOY_BRANCH")"
 
-if [ "$current" = "$target" ] && [ "$FORCE" != "1" ]; then
-    echo "Already at ${current:0:12}; nothing to deploy."
+# Compare against what was last built here, not against HEAD. A checkout that
+# somebody moved by hand without rebuilding leaves the container on older code,
+# and comparing HEAD to origin would call that "nothing to deploy". With no
+# state file yet, this deliberately rebuilds once to make image and HEAD agree.
+if [ "$deployed" = "$target" ] && [ "$FORCE" != "1" ]; then
+    echo "Already deployed ${target:0:12}; nothing to do."
     exit 0
 fi
 
@@ -103,7 +111,9 @@ while true; do
     sleep 5
 done
 
-# Each rebuild leaves the previous image behind; the VM only has a 30 GB disk.
+printf '%s\n' "$target" >"$state_file"
+
+# Each rebuild leaves the previous image behind, and disk is finite.
 docker image prune -f >/dev/null
 
 echo "Deployed ${target:0:12}."
