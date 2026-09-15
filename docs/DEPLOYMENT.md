@@ -6,6 +6,7 @@ This guide covers deploying OpenPlaud to production environments.
 
 - [Prerequisites](#prerequisites)
 - [Docker Deployment (Recommended)](#docker-deployment-recommended)
+- [Automated Deploys](#automated-deploys)
 - [Manual Deployment](#manual-deployment)
 - [Environment Variables](#environment-variables)
 - [Database Setup](#database-setup)
@@ -109,6 +110,75 @@ Migrations run automatically on container start. To run manually:
 ```bash
 docker compose exec app pnpm db:migrate
 ```
+
+## Automated Deploys
+
+`docker-compose.yml` builds the app image from the checkout on the server
+(`build: .`), so shipping a change means pulling the new commit and rebuilding
+there. `scripts/deploy.sh` does exactly that: it refuses to run if tracked files
+were modified on the server, fast-forwards the checkout to `origin/main`, skips
+the rebuild when nothing moved, runs `docker compose up -d --build`, and fails if
+the container does not report healthy. Migrations are not its job; they run from
+the container entrypoint on start.
+
+Pick one of the two triggers below. Installing both is harmless (the script takes
+a lock, so the loser skips) but pointless.
+
+### Option A: systemd timer on the server (no credentials)
+
+The server polls for new commits. Nothing needs inbound access, no secrets live
+in GitHub, and there is nothing to configure in GCP. A deploy lands within the
+timer interval, five minutes by default.
+
+```bash
+cd /opt/openplaud
+git pull
+
+sudo cp deploy/systemd/openplaud-deploy.* /etc/systemd/system/
+# Must be the user that owns /opt/openplaud and is in the docker group:
+sudo sed -i "s/^User=CHANGE_ME/User=$USER/" /etc/systemd/system/openplaud-deploy.service
+
+sudo systemctl daemon-reload
+sudo systemctl enable --now openplaud-deploy.timer
+```
+
+Check on it:
+
+```bash
+systemctl list-timers openplaud-deploy.timer
+journalctl -u openplaud-deploy.service -n 50
+```
+
+Change the interval in `openplaud-deploy.timer` (`OnUnitActiveSec`), then
+`sudo systemctl daemon-reload && sudo systemctl restart openplaud-deploy.timer`.
+
+### Option B: GitHub Actions on push to main
+
+`.github/workflows/deploy.yml` reaches the server over an IAP tunnel and runs the
+same script, so a merge deploys immediately. It needs one-time setup in GCP:
+
+1. Create a service account for deploys and grant it, on the project:
+   `roles/iap.tunnelResourceAccessor`, `roles/compute.viewer`,
+   `roles/compute.osLogin`.
+2. Set up [Workload Identity Federation](https://github.com/google-github-actions/auth#preferred-direct-workload-identity-federation)
+   for this repository, and add the repository secrets
+   `GCP_WORKLOAD_IDENTITY_PROVIDER` and `GCP_SERVICE_ACCOUNT`.
+3. On the server, give that account's OS Login user write access to
+   `/opt/openplaud` and membership of the `docker` group. Without this the SSH
+   session cannot rebuild, which is the most common reason the job fails.
+
+The workflow's `VM_NAME` and `VM_ZONE` are set at the top of the file.
+
+### Deploying by hand
+
+```bash
+gcloud compute ssh openplaud --zone us-central1-a --tunnel-through-iap \
+  --command "bash /opt/openplaud/scripts/deploy.sh"
+```
+
+Add `FORCE=1` to rebuild a commit that is already checked out. If a deploy fails
+its health check, the script prints the exact `git reset` + rebuild command to
+roll back to the previous commit.
 
 ## Manual Deployment
 

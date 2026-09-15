@@ -1,0 +1,12 @@
+[Unit]
+Description=Check for new OpenPlaud commits on origin/main
+
+[Timer]
+OnBootSec=3min
+OnUnitActiveSec=5min
+# Runs are cheap when nothing changed (a git fetch), so a fixed interval is fine.
+AccuracySec=30s
+Unit=openplaud-deploy.service
+
+[Install]
+WantedBy=timers.target

@@ -1,0 +1,63 @@
+# Push-triggered deploy. Optional: the systemd timer in deploy/systemd/ does the
+# same work on a schedule and needs no credentials. Install one of the two, not
+# both, or a push and a tick can collide (the script takes a lock, so the loser
+# skips rather than corrupting anything, but the deploy is then simply late).
+#
+# Setup this workflow needs, once, in GCP — see docs/DEPLOYMENT.md:
+#   - a service account with roles/iap.tunnelResourceAccessor,
+#     roles/compute.viewer and roles/compute.osLogin on the project
+#   - that account's OS Login user added to the `docker` group on the VM and
+#     given write access to /opt/openplaud
+#   - Workload Identity Federation wired to this repository
+#   - repository secrets GCP_WORKLOAD_IDENTITY_PROVIDER and GCP_SERVICE_ACCOUNT
+
+name: Deploy
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+# Never let a second deploy start while one is half-applied on the VM.
+concurrency:
+  group: deploy-production
+  cancel-in-progress: false
+
+env:
+  VM_NAME: openplaud
+  VM_ZONE: us-central1-a
+
+jobs:
+  deploy:
+    name: Pull and rebuild on the VM
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write # Workload Identity Federation mints an OIDC token
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Authenticate to Google Cloud
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ secrets.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ secrets.GCP_SERVICE_ACCOUNT }}
+
+      - name: Set up gcloud
+        uses: google-github-actions/setup-gcloud@v2
+
+      # Copied rather than run from the checkout: the deploy resets that
+      # checkout, which would rewrite the script while bash is reading it.
+      - name: Copy deploy script to the VM
+        run: |
+          gcloud compute scp scripts/deploy.sh "${VM_NAME}:/tmp/openplaud-deploy.sh" \
+            --zone "$VM_ZONE" --tunnel-through-iap --quiet
+
+      - name: Pull and rebuild
+        run: |
+          gcloud compute ssh "$VM_NAME" \
+            --zone "$VM_ZONE" --tunnel-through-iap --quiet \
+            --command "bash /tmp/openplaud-deploy.sh"

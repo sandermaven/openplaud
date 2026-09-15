@@ -93,4 +93,8 @@ gcloud compute ssh openplaud --zone us-central1-a --tunnel-through-iap \
   Testing Library, so client components are covered by type-check + manual QA,
   not unit tests.
 - Deploy is PR-based onto `main` (see recent history: one squash-merged PR per
-  fix).
+  fix). Landing on `main` is not the same as being live: the VM builds the image
+  from its own checkout, so a deploy is a pull + `docker compose up -d --build`
+  there. `scripts/deploy.sh` does that; see **Automated Deploys** in
+  `docs/DEPLOYMENT.md` for the systemd timer and the Actions workflow that call
+  it, and check which one is actually installed before assuming a merge shipped.
