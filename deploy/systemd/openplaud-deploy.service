@@ -1,0 +1,31 @@
+# Checks origin/main and rebuilds when it moved. Installed on the VM:
+#
+#   sudo cp /opt/openplaud/deploy/systemd/openplaud-deploy.* /etc/systemd/system/
+#   sudo sed -i 's/^User=CHANGE_ME/User=YOUR_USER/' /etc/systemd/system/openplaud-deploy.service
+#   sudo systemctl daemon-reload
+#   sudo systemctl enable --now openplaud-deploy.timer
+#
+# See docs/DEPLOYMENT.md for the full walkthrough.
+
+[Unit]
+Description=Deploy OpenPlaud from origin/main
+After=network-online.target docker.service
+Wants=network-online.target
+Requires=docker.service
+
+[Service]
+Type=oneshot
+
+# Must be the user that owns /opt/openplaud and is in the docker group, so the
+# checkout keeps its ownership and `docker compose` works without sudo.
+User=CHANGE_ME
+
+WorkingDirectory=/opt/openplaud
+
+# The deploy resets the checkout, which rewrites scripts/deploy.sh underneath a
+# running bash. Run it from a copy outside the checkout instead.
+ExecStartPre=/usr/bin/install -m 0755 /opt/openplaud/scripts/deploy.sh /run/openplaud-deploy.sh
+ExecStart=/run/openplaud-deploy.sh
+
+# A build on a 1 GB e2-micro is slow; do not let systemd kill it halfway.
+TimeoutStartSec=1800
