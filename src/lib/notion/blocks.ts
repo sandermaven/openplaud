@@ -30,10 +30,7 @@ export function chunkText(text: string): string[] {
         }
 
         // Find a good break point (newline or space near the limit)
-        let breakPoint = remaining.lastIndexOf(
-            "\n",
-            MAX_RICH_TEXT_LENGTH,
-        );
+        let breakPoint = remaining.lastIndexOf("\n", MAX_RICH_TEXT_LENGTH);
         if (breakPoint === -1 || breakPoint < MAX_RICH_TEXT_LENGTH * 0.5) {
             breakPoint = remaining.lastIndexOf(" ", MAX_RICH_TEXT_LENGTH);
         }

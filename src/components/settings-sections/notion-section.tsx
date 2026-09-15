@@ -5,8 +5,6 @@ import { useEffect, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Switch } from "@/components/ui/switch";
-import { Textarea } from "@/components/ui/textarea";
 import {
     Select,
     SelectContent,
@@ -14,6 +12,8 @@ import {
     SelectTrigger,
     SelectValue,
 } from "@/components/ui/select";
+import { Switch } from "@/components/ui/switch";
+import { Textarea } from "@/components/ui/textarea";
 import { useSettings } from "@/hooks/use-settings";
 
 const LANGUAGES = [
@@ -49,11 +49,8 @@ interface NotionConfig {
 }
 
 export function NotionSection() {
-    const {
-        isLoadingSettings,
-        setIsLoadingSettings,
-        isSavingSettings,
-    } = useSettings();
+    const { isLoadingSettings, setIsLoadingSettings, isSavingSettings } =
+        useSettings();
 
     const [config, setConfig] = useState<NotionConfig | null>(null);
     const [token, setToken] = useState("");
@@ -63,9 +60,7 @@ export function NotionSection() {
     const parseDatabaseId = (input: string): string => {
         const trimmed = input.trim();
         // Match 32-char hex ID from URL like https://www.notion.so/workspace/9ac49c1f8ea84c42a8d41185d4bf86fe?v=...
-        const urlMatch = trimmed.match(
-            /([0-9a-f]{32})(?:\?|$)/i,
-        );
+        const urlMatch = trimmed.match(/([0-9a-f]{32})(?:\?|$)/i);
         if (urlMatch) return urlMatch[1];
         // Match UUID format (with dashes)
         const uuidMatch = trimmed.match(
@@ -113,7 +108,9 @@ export function NotionSection() {
                         setIncludeActionItems(data.config.includeActionItems);
                         setIncludeSummary(data.config.includeSummary);
                         setLanguage(data.config.language);
-                        setSummaryPrompt(data.config.summaryPrompt || DEFAULT_SUMMARY_PROMPT);
+                        setSummaryPrompt(
+                            data.config.summaryPrompt || DEFAULT_SUMMARY_PROMPT,
+                        );
                     }
                 }
             } catch (err) {
@@ -306,7 +303,8 @@ export function NotionSection() {
 
             {config?.source === "env" && (
                 <p className="text-xs text-muted-foreground bg-muted px-3 py-2 rounded-md">
-                    Using environment variables (NOTION_TOKEN, NOTION_DATABASE_ID). Save via the UI to override.
+                    Using environment variables (NOTION_TOKEN,
+                    NOTION_DATABASE_ID). Save via the UI to override.
                 </p>
             )}
 
@@ -523,11 +521,7 @@ export function NotionSection() {
 
                 {/* Save / Delete buttons */}
                 <div className="flex items-center gap-2">
-                    <Button
-                        onClick={handleSave}
-                        disabled={isSaving}
-                        size="sm"
-                    >
+                    <Button onClick={handleSave} disabled={isSaving} size="sm">
                         {isSaving ? (
                             <>
                                 <Loader2 className="w-4 h-4 animate-spin" />

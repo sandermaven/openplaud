@@ -1,8 +1,8 @@
 import { execFile } from "node:child_process";
 import {
     mkdtemp,
-    readFile,
     readdir,
+    readFile,
     unlink,
     writeFile,
 } from "node:fs/promises";
@@ -108,8 +108,9 @@ export async function compressAudioForTranscription(
     filename: string,
 ): Promise<AudioChunk[]> {
     const isOversized = audioBuffer.length > WHISPER_MAX_SIZE;
-    const hasUnsupportedExt =
-        !filename.match(/\.(mp3|m4a|mp4|mpeg|mpga|wav|webm|flac|ogg|oga)$/i);
+    const hasUnsupportedExt = !filename.match(
+        /\.(mp3|m4a|mp4|mpeg|mpga|wav|webm|flac|ogg|oga)$/i,
+    );
 
     if (!isOversized && !hasUnsupportedExt) {
         const contentType = filename.endsWith(".mp3")

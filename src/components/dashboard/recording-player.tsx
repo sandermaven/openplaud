@@ -98,6 +98,10 @@ export function RecordingPlayer({
         }
     }, [playbackSpeed]);
 
+    // `recording` is not read in the body, but a new recording must re-attach
+    // the listeners and re-read the duration off the reloaded element. Dropping
+    // it keeps a stale duration when that element is already loaded.
+    // biome-ignore lint/correctness/useExhaustiveDependencies: re-subscribing on a new recording is deliberate
     useEffect(() => {
         if (!audioRef.current) return;
 
