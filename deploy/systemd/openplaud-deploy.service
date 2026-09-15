@@ -23,9 +23,12 @@ User=CHANGE_ME
 WorkingDirectory=/opt/openplaud
 
 # The deploy resets the checkout, which rewrites scripts/deploy.sh underneath a
-# running bash. Run it from a copy outside the checkout instead.
-ExecStartPre=/usr/bin/install -m 0755 /opt/openplaud/scripts/deploy.sh /run/openplaud-deploy.sh
-ExecStart=/run/openplaud-deploy.sh
+# running bash. Run it from a copy outside the checkout instead. systemd creates
+# /run/openplaud-deploy owned by User= for us; writing straight into /run fails,
+# because that is root's.
+RuntimeDirectory=openplaud-deploy
+ExecStartPre=/usr/bin/install -m 0755 /opt/openplaud/scripts/deploy.sh /run/openplaud-deploy/deploy.sh
+ExecStart=/run/openplaud-deploy/deploy.sh
 
-# A build on a 1 GB e2-micro is slow; do not let systemd kill it halfway.
+# A rebuild takes minutes; do not let systemd kill it halfway.
 TimeoutStartSec=1800
