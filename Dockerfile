@@ -31,6 +31,12 @@ RUN apt-get update && apt-get install -y --no-install-recommends ffmpeg && rm -r
 ENV NODE_ENV=production
 ENV NEXT_TELEMETRY_DISABLED=1
 
+# The standalone server binds to $HOSTNAME, and Docker sets that to the
+# container id. That leaves it listening on the container IP only, so the
+# healthcheck's request to 127.0.0.1:3000 is refused and the container stays
+# unhealthy while the app is in fact serving fine through the published port.
+ENV HOSTNAME=0.0.0.0
+
 # Copy Next.js standalone output + public files
 COPY --from=builder /app/public ./public
 COPY --from=builder /app/.next/standalone ./
