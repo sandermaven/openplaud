@@ -74,9 +74,9 @@ describe("Notion Integration", () => {
                 expect(codeBlock.code.language).toBe("markdown");
                 expect(codeBlock.code.rich_text).toHaveLength(1);
                 const item = codeBlock.code.rich_text[0];
-                expect(
-                    item.type === "text" && item.text.content,
-                ).toBe("This is a test transcription.");
+                expect(item.type === "text" && item.text.content).toBe(
+                    "This is a test transcription.",
+                );
             }
         });
 

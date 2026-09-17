@@ -154,8 +154,7 @@ export async function syncTranscriptionToNotion(
         }
 
         // Extract the page URL
-        const pageUrl =
-            "url" in page ? (page.url as string) : null;
+        const pageUrl = "url" in page ? (page.url as string) : null;
 
         // Update transcription with success + Notion page reference
         await db

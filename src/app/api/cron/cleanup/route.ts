@@ -1,9 +1,9 @@
+import { and, eq, isNotNull, lt } from "drizzle-orm";
 import { NextResponse } from "next/server";
-import { and, eq, lt, isNotNull } from "drizzle-orm";
 import { db } from "@/db";
 import { recordings, transcriptions, userSettings } from "@/db/schema";
-import { createStorageProvider } from "@/lib/storage/factory";
 import { env } from "@/lib/env";
+import { createStorageProvider } from "@/lib/storage/factory";
 
 export const maxDuration = 300; // 5 minutes
 
@@ -103,15 +103,11 @@ export async function GET(request: Request) {
                 );
             }
         } catch (error) {
-            console.error(
-                `[cron-cleanup] Failed for user ${userId}:`,
-                error,
-            );
+            console.error(`[cron-cleanup] Failed for user ${userId}:`, error);
             results.push({
                 userId,
                 deleted: 0,
-                error:
-                    error instanceof Error ? error.message : "Unknown error",
+                error: error instanceof Error ? error.message : "Unknown error",
             });
         }
     }

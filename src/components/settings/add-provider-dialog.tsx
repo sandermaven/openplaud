@@ -118,7 +118,9 @@ export function AddProviderDialog({
 
             if (!response.ok) {
                 const data = await response.json().catch(() => ({}));
-                throw new Error(data.error || `Server error ${response.status}`);
+                throw new Error(
+                    data.error || `Server error ${response.status}`,
+                );
             }
 
             toast.success("AI provider added successfully");
@@ -133,7 +135,9 @@ export function AddProviderDialog({
             setIsDefaultEnhancement(false);
         } catch (err) {
             toast.error(
-                err instanceof Error ? err.message : "Failed to add AI provider",
+                err instanceof Error
+                    ? err.message
+                    : "Failed to add AI provider",
             );
         } finally {
             setIsLoading(false);

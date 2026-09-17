@@ -179,7 +179,7 @@ export async function GET(
                 const fetchHeaders: HeadersInit = {};
                 const rangeHeader = request.headers.get("range");
                 if (rangeHeader) {
-                    fetchHeaders["Range"] = rangeHeader;
+                    fetchHeaders.Range = rangeHeader;
                 }
 
                 const audioResponse = await fetch(tempUrlResponse.temp_url, {

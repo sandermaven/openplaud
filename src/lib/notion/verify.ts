@@ -72,12 +72,6 @@ export async function verifyNotionConnection(
         const hasStatus = Object.values(properties).some(
             (p) => p.type === "status",
         );
-        const hasTags = Object.values(properties).some(
-            (p) =>
-                p.type === "multi_select" &&
-                p.name.toLowerCase() === "tags",
-        );
-
         const missingProps: string[] = [];
         if (!hasTitle) missingProps.push("Name (title)");
         if (!hasStatus) missingProps.push("Status");

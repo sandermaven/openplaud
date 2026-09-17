@@ -47,8 +47,7 @@ export async function POST(request: Request) {
 
         return NextResponse.json(result);
     } catch (error) {
-        const message =
-            error instanceof Error ? error.message : String(error);
+        const message = error instanceof Error ? error.message : String(error);
         console.error("Error verifying Notion connection:", message, error);
         return NextResponse.json(
             {

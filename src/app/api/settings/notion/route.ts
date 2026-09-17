@@ -105,7 +105,8 @@ export async function PUT(request: Request) {
             if (includeSummary !== undefined)
                 updates.includeSummary = includeSummary;
             if (language !== undefined) updates.language = language;
-            if (summaryPrompt !== undefined) updates.summaryPrompt = summaryPrompt;
+            if (summaryPrompt !== undefined)
+                updates.summaryPrompt = summaryPrompt;
 
             await db
                 .update(notionConfig)

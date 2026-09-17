@@ -1,5 +1,4 @@
-import { after } from "next/server";
-import { NextResponse } from "next/server";
+import { after, NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
 import { AppError, createErrorResponse, ErrorCode } from "@/lib/errors";
 import { syncRecordingsForUser } from "@/lib/sync/sync-recordings";
