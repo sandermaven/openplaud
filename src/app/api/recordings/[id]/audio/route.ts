@@ -6,6 +6,7 @@ import { db } from "@/db";
 import { plaudConnections, recordings } from "@/db/schema";
 import { auth } from "@/lib/auth";
 import { createPlaudClient } from "@/lib/plaud/client";
+import { isAccountMigratedError } from "@/lib/plaud/connection-errors";
 import { createUserStorageProvider } from "@/lib/storage/factory";
 import { LocalStorage } from "@/lib/storage/local-storage";
 import { S3Storage } from "@/lib/storage/s3-storage";
@@ -169,10 +170,24 @@ export async function GET(
                         encryptedRefreshToken: connection.refreshToken,
                     },
                 );
-                const tempUrlResponse = await plaudClient.getTempUrl(
-                    recording.plaudFileId,
-                    false,
-                );
+                // Migrated (Plaud 4.0) accounts have no temp-url endpoint
+                // left; their presigned URL comes off the file detail in
+                // the 4.0 tree instead.
+                let sourceUrl: string;
+                try {
+                    const tempUrlResponse = await plaudClient.getTempUrl(
+                        recording.plaudFileId,
+                        false,
+                    );
+                    sourceUrl = tempUrlResponse.temp_url;
+                } catch (error) {
+                    const message =
+                        error instanceof Error ? error.message : String(error);
+                    if (!isAccountMigratedError(message)) throw error;
+                    sourceUrl = await plaudClient.getAudioUrlV4(
+                        recording.plaudFileId,
+                    );
+                }
 
                 // Proxy the audio stream instead of redirecting to avoid
                 // cross-origin issues with iOS Safari's audio element
@@ -182,7 +197,7 @@ export async function GET(
                     fetchHeaders.Range = rangeHeader;
                 }
 
-                const audioResponse = await fetch(tempUrlResponse.temp_url, {
+                const audioResponse = await fetch(sourceUrl, {
                     headers: fetchHeaders,
                 });
 

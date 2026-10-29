@@ -4,8 +4,19 @@ import type {
     PlaudRecordingsResponse,
     PlaudTempUrlResponse,
 } from "@/types/plaud";
+import { isAccountMigratedError } from "./connection-errors";
 import type { TokenRefresher } from "./refresh";
 import { DEFAULT_SERVER_KEY, PLAUD_SERVERS } from "./servers";
+import {
+    audioObject,
+    migratedFileId,
+    nodeIdFromRecordingId,
+    type PlaudV4FileDetail,
+    type PlaudV4ListResponse,
+    type PlaudV4Node,
+    V4_RECORDINGS_FOLDER_TYPE,
+    V4_ROOT_NODE,
+} from "./v4";
 
 export interface PlaudUpdateFilenameResponse {
     status: number;
@@ -326,9 +337,16 @@ export class PlaudClient {
             const arrayBuffer = await response.arrayBuffer();
             return Buffer.from(arrayBuffer);
         } catch (error) {
-            throw new Error(
-                `Failed to download recording: ${error instanceof Error ? error.message : String(error)}`,
-            );
+            const message =
+                error instanceof Error ? error.message : String(error);
+
+            // A migrated account has no legacy temp-url endpoint left; the
+            // same recording is reachable through the 4.0 tree.
+            if (isAccountMigratedError(message)) {
+                return this.downloadRecordingV4(fileId);
+            }
+
+            throw new Error(`Failed to download recording: ${message}`);
         }
     }
 
@@ -358,6 +376,116 @@ export class PlaudClient {
             method: "PATCH",
             body: JSON.stringify({ filename }),
         });
+    }
+
+    // ---------------------------------------------------------------
+    // Plaud 4.0 ("sigma") API. See ./v4.ts for the shape of the tree and
+    // why migrated ids map onto the legacy ones.
+    // ---------------------------------------------------------------
+
+    /** Cached per client instance; the id is stable for the workspace. */
+    private recordingsFolderId?: string;
+
+    /** Locate the system "Recordings" folder in the 4.0 tree. */
+    async getRecordingsFolderIdV4(): Promise<string> {
+        if (this.recordingsFolderId) return this.recordingsFolderId;
+
+        const res = await this.request<PlaudV4ListResponse>(
+            `/file-app/v4/folders/children?node_id=${V4_ROOT_NODE}&page_size=50`,
+        );
+        const folder = res.data.items.find(
+            (i) => i.system_folder_type === V4_RECORDINGS_FOLDER_TYPE,
+        );
+        if (!folder) {
+            throw new Error("Plaud 4.0: no recordings folder in root");
+        }
+
+        this.recordingsFolderId = folder.node_id;
+        return folder.node_id;
+    }
+
+    /**
+     * List recording nodes, newest first, following the cursor.
+     *
+     * This is deliberately cheap: it returns the nodes only, without
+     * resolving each one's file. The caller decides which nodes it has not
+     * seen before (node id plus `version_ms` are enough) and pays for a
+     * detail lookup on just those.
+     */
+    async listRecordingNodesV4(
+        pageSize: number = 50,
+        maxPages: number = 20,
+    ): Promise<PlaudV4Node[]> {
+        const folderId = await this.getRecordingsFolderIdV4();
+        const nodes: PlaudV4Node[] = [];
+        let cursor = "";
+
+        for (let page = 0; page < maxPages; page++) {
+            const params = new URLSearchParams({
+                node_id: folderId,
+                page_size: pageSize.toString(),
+            });
+            if (cursor) params.set("cursor", cursor);
+
+            const res = await this.request<PlaudV4ListResponse>(
+                `/file-app/v4/folders/content?${params.toString()}`,
+            );
+            nodes.push(...(res.data.items ?? []));
+
+            cursor = res.data.next_cursor ?? "";
+            if (!cursor || (res.data.items?.length ?? 0) < pageSize) break;
+        }
+
+        return nodes;
+    }
+
+    /** The file id held by a recording node. Costs one request. */
+    async resolveFileIdV4(nodeId: string): Promise<string> {
+        const res = await this.request<PlaudV4ListResponse>(
+            `/file-app/v4/folders/content?node_id=${encodeURIComponent(nodeId)}&page_size=20`,
+        );
+        const file = res.data.items?.find((i) => i.file_id);
+        if (!file) {
+            throw new Error(`Plaud 4.0: node ${nodeId} holds no file`);
+        }
+        return file.file_id;
+    }
+
+    async getFileDetailV4(fileId: string): Promise<PlaudV4FileDetail> {
+        return this.request<PlaudV4FileDetail>(
+            `/file-app/v4/files/detail/${encodeURIComponent(fileId)}`,
+        );
+    }
+
+    /**
+     * File id for a stored recording id, avoiding a round-trip where the id
+     * arithmetic already gives the answer (every pre-migration recording).
+     */
+    async fileIdForRecordingV4(recordingId: string): Promise<string> {
+        const derived = migratedFileId(recordingId);
+        if (derived) return derived;
+        return this.resolveFileIdV4(nodeIdFromRecordingId(recordingId));
+    }
+
+    /** Presigned audio URL for a stored recording id. */
+    async getAudioUrlV4(recordingId: string): Promise<string> {
+        const fileId = await this.fileIdForRecordingV4(recordingId);
+        const detail = await this.getFileDetailV4(fileId);
+        const audio = audioObject(detail.data);
+        if (!audio?.content_url) {
+            throw new Error(`Plaud 4.0: no audio object for ${recordingId}`);
+        }
+        return audio.content_url;
+    }
+
+    /** Download a recording's audio through the 4.0 API. */
+    async downloadRecordingV4(recordingId: string): Promise<Buffer> {
+        const url = await this.getAudioUrlV4(recordingId);
+        const response = await fetch(url);
+        if (!response.ok) {
+            throw new Error(`Failed to download file: ${response.statusText}`);
+        }
+        return Buffer.from(await response.arrayBuffer());
     }
 }
 
