@@ -29,3 +29,16 @@ export function isConnectionExpiredError(message: string): boolean {
     const m = message.toLowerCase();
     return CONNECTION_ERROR_MARKERS.some((marker) => m.includes(marker));
 }
+
+/**
+ * True for the specific failure that says the account lives on Plaud 4.0 and
+ * the legacy `/file/*` endpoints will never answer for it again.
+ *
+ * Unlike the markers above this is not a credential problem: a token issued
+ * minutes ago gets the same answer. It is the signal to retry the call
+ * against the 4.0 API instead of asking the user to reconnect.
+ */
+export function isAccountMigratedError(message: string): boolean {
+    const m = message.toLowerCase();
+    return m.includes("-1800907") || m.includes("account migrated");
+}

@@ -1,4 +1,4 @@
-import { and, eq, isNull, lt, notInArray, or } from "drizzle-orm";
+import { and, eq, inArray, isNull, lt, notInArray, or } from "drizzle-orm";
 import { db } from "@/db";
 import {
     plaudConnections,
@@ -11,6 +11,8 @@ import { env } from "@/lib/env";
 import { sendNewRecordingBarkNotification } from "@/lib/notifications/bark";
 import { sendNewRecordingEmail } from "@/lib/notifications/email";
 import { createPlaudClient } from "@/lib/plaud/client";
+import { isAccountMigratedError } from "@/lib/plaud/connection-errors";
+import { recordingIdFromNode, toPlaudRecording } from "@/lib/plaud/v4";
 import { createUserStorageProvider } from "@/lib/storage/factory";
 import type { PlaudRecording } from "@/types/plaud";
 
@@ -85,9 +87,16 @@ async function processRecording(
             false,
         );
 
-        const fileExtension = "mp3";
+        // The legacy API served MP3; Plaud 4.0 hands back OGG/Opus. Store
+        // the container we actually downloaded, otherwise playback and
+        // transcription get handed an .mp3 that is not one. The 4.0 mapper
+        // puts the audio mime in `filetype`; the legacy API puts something
+        // else there, so anything that is not an audio mime stays MP3.
+        const contentType = plaudRecording.filetype?.startsWith("audio/")
+            ? plaudRecording.filetype
+            : "audio/mpeg";
+        const fileExtension = contentType === "audio/ogg" ? "ogg" : "mp3";
         const storageKey = `${context.userId}/${plaudRecording.id}.${fileExtension}`;
-        const contentType = "audio/mpeg";
         await storage.uploadFile(storageKey, audioBuffer, contentType);
 
         const recordingData = {
@@ -196,6 +205,61 @@ async function processBatch(
 }
 
 /**
+ * Collect the recordings a migrated (Plaud 4.0) account still owes us.
+ *
+ * The 4.0 listing is a folder tree, so a recording's file id costs an extra
+ * two requests to resolve. Listing the nodes is cheap though, and a node
+ * carries both its identity and its `version_ms`, which is exactly what the
+ * skip check needs. So we list first, drop everything already stored at the
+ * same version, and only pay for the rest. On a quiet 15-minute cycle that
+ * is one request; a full first run costs two per recording.
+ */
+async function collectMigratedRecordings(
+    userId: string,
+    plaudClient: Awaited<ReturnType<typeof createPlaudClient>>,
+): Promise<{ records: PlaudRecording[]; errors: string[] }> {
+    const nodes = await plaudClient.listRecordingNodesV4(
+        SYNC_CONFIG.PAGE_SIZE,
+        SYNC_CONFIG.MAX_PAGES,
+    );
+    const errors: string[] = [];
+    if (nodes.length === 0) return { records: [], errors };
+
+    const ids = nodes.map((n) => recordingIdFromNode(n.node_id));
+    const stored = await db
+        .select({
+            plaudFileId: recordings.plaudFileId,
+            plaudVersion: recordings.plaudVersion,
+        })
+        .from(recordings)
+        .where(
+            and(
+                eq(recordings.userId, userId),
+                inArray(recordings.plaudFileId, ids),
+            ),
+        );
+    const storedVersions = new Map(
+        stored.map((r) => [r.plaudFileId, r.plaudVersion]),
+    );
+
+    const records: PlaudRecording[] = [];
+    for (const node of nodes) {
+        const id = recordingIdFromNode(node.node_id);
+        if (storedVersions.get(id) === node.version_ms.toString()) continue;
+
+        try {
+            const fileId = await plaudClient.resolveFileIdV4(node.node_id);
+            const detail = await plaudClient.getFileDetailV4(fileId);
+            records.push(toPlaudRecording(node, detail.data));
+        } catch (error) {
+            errors.push(`Failed to resolve ${node.name}: ${error}`);
+        }
+    }
+
+    return { records, errors };
+}
+
+/**
  * Sync recordings for a user with optimized batch processing
  *
  * Optimizations:
@@ -261,37 +325,13 @@ export async function syncRecordingsForUser(
         const storage = await createUserStorageProvider(userId);
         const allNewRecordingNames: string[] = [];
 
-        // Paginated sync - fetch newest first
-        let page = 0;
-        let hasMore = true;
-        let consecutiveEmptyPages = 0;
-
-        while (hasMore && page < SYNC_CONFIG.MAX_PAGES) {
-            const skip = page * SYNC_CONFIG.PAGE_SIZE;
-            const recordingsResponse = await plaudClient.getRecordings(
-                skip,
-                SYNC_CONFIG.PAGE_SIZE,
-                0, // not trash
-                "edit_time",
-                true, // descending (newest first)
-            );
-
-            const plaudRecordings = recordingsResponse.data_file_list;
-
-            if (plaudRecordings.length === 0) {
-                break;
-            }
-
-            // Process in concurrent batches
+        const runBatches = async (list: PlaudRecording[]) => {
             for (
                 let i = 0;
-                i < plaudRecordings.length;
+                i < list.length;
                 i += SYNC_CONFIG.BATCH_CONCURRENCY
             ) {
-                const batch = plaudRecordings.slice(
-                    i,
-                    i + SYNC_CONFIG.BATCH_CONCURRENCY,
-                );
+                const batch = list.slice(i, i + SYNC_CONFIG.BATCH_CONCURRENCY);
                 const batchResult = await processBatch(
                     batch,
                     context,
@@ -307,6 +347,45 @@ export async function syncRecordingsForUser(
                 );
                 allNewRecordingNames.push(...batchResult.newRecordingNames);
             }
+        };
+
+        // Paginated sync - fetch newest first
+        let page = 0;
+        let hasMore = true;
+        let consecutiveEmptyPages = 0;
+        let migrated = false;
+
+        while (hasMore && page < SYNC_CONFIG.MAX_PAGES) {
+            const skip = page * SYNC_CONFIG.PAGE_SIZE;
+
+            let plaudRecordings: PlaudRecording[];
+            try {
+                const recordingsResponse = await plaudClient.getRecordings(
+                    skip,
+                    SYNC_CONFIG.PAGE_SIZE,
+                    0, // not trash
+                    "edit_time",
+                    true, // descending (newest first)
+                );
+                plaudRecordings = recordingsResponse.data_file_list;
+            } catch (error) {
+                const message =
+                    error instanceof Error ? error.message : String(error);
+                // Plaud moved this account to 4.0 and retired the legacy
+                // file endpoints for it. Nothing here will ever succeed
+                // again, so hand the whole sync to the 4.0 path.
+                if (isAccountMigratedError(message)) {
+                    migrated = true;
+                    break;
+                }
+                throw error;
+            }
+
+            if (plaudRecordings.length === 0) {
+                break;
+            }
+
+            await runBatches(plaudRecordings);
 
             // Early exit optimization: if we got fewer recordings than requested,
             // or if we had no new/updated recordings for 2 pages, we're done
@@ -325,6 +404,15 @@ export async function syncRecordingsForUser(
             }
 
             page++;
+        }
+
+        if (migrated) {
+            const { records, errors } = await collectMigratedRecordings(
+                userId,
+                plaudClient,
+            );
+            result.errors.push(...errors);
+            await runBatches(records);
         }
 
         // Update last sync time. If the client auto-redirected to a
