@@ -1,5 +1,12 @@
-# Base image with Bun
-FROM oven/bun:1 AS base
+# Base image with Bun.
+#
+# Pinned, not `bun:1`. There is no bun.lock in the repo, so `bun install
+# --frozen-lockfile` migrates pnpm-lock.yaml on every build and the result has
+# to come out byte-identical. Bun 1.4.4 migrates it differently than 1.4.2 did
+# and fails with "lockfile had changes, but lockfile is frozen", which broke
+# both CI and the VM rebuild without a single dependency changing. Committing a
+# bun.lock would remove the migration step and let this float again.
+FROM oven/bun:1.4.2 AS base
 WORKDIR /app
 
 # Install dependencies
