@@ -4,6 +4,7 @@ import { db } from "@/db";
 import { plaudConnections, userSettings, users } from "@/db/schema";
 import { env } from "@/lib/env";
 import { sendEmail } from "@/lib/notifications/email";
+import { isConnectionExpiredError } from "@/lib/plaud/connection-errors";
 import { syncRecordingsForUser } from "@/lib/sync/sync-recordings";
 import { transcribeRecording } from "@/lib/transcription/transcribe-recording";
 
@@ -13,20 +14,6 @@ export const maxDuration = 300; // 5 minutes
 const CONNECTION_ERROR_NOTIFY_COOLDOWN_MS = 12 * 60 * 60 * 1000;
 
 const RECONNECT_PATH = "/onboarding?reconnect=1";
-
-/**
- * True when a sync failure means the per-account Plaud bearer token is no
- * longer valid (Plaud returns app-level status -419 for this). Reconnecting
- * is the only fix, so these get the dashboard banner + email.
- */
-function isConnectionExpiredError(message: string): boolean {
-    const m = message.toLowerCase();
-    return (
-        m.includes("-419") ||
-        m.includes("token expired") ||
-        m.includes("workspace token")
-    );
-}
 
 type SyncConnection = {
     id: string;
