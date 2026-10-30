@@ -1,4 +1,4 @@
-import { and, eq, gte, inArray, isNull, lt, notInArray, or } from "drizzle-orm";
+import { and, eq, inArray, isNull, lt, notInArray, or } from "drizzle-orm";
 import { db } from "@/db";
 import {
     plaudConnections,
@@ -37,18 +37,6 @@ const SYNC_CONFIG = {
 const TRANSCRIPTION_FAILURE_COOLDOWN_MS = 60 * 60 * 1000;
 /** Give up auto-retrying after this many consecutive failures. */
 const TRANSCRIPTION_MAX_FAILURES = 5;
-/**
- * Only auto-transcribe recordings made within this window.
- *
- * The queue below asks for every untranscribed recording a user owns, not
- * just the ones this sync brought in, so anything that ever slipped through
- * is retried on every cycle. On an account with hundreds of recordings that
- * is an unbounded, paid backlog that can restart at any time: a storage
- * rewrite, a restored backup or a cleared transcriptions table is enough.
- * Auto-transcription exists for recordings that just arrived, so it stops at
- * a day old. Anything older is transcribed on request from the UI.
- */
-const AUTO_TRANSCRIBE_MAX_AGE_MS = 24 * 60 * 60 * 1000;
 
 interface SyncResult {
     newRecordings: number;
@@ -551,10 +539,6 @@ export async function syncRecordingsForUser(
             const cooldown = new Date(
                 Date.now() - TRANSCRIPTION_FAILURE_COOLDOWN_MS,
             );
-            const oldestAutoTranscribable = new Date(
-                Date.now() - AUTO_TRANSCRIBE_MAX_AGE_MS,
-            );
-
             const untranscribed = await db
                 .select({ id: recordings.id })
                 .from(recordings)
@@ -562,7 +546,6 @@ export async function syncRecordingsForUser(
                     and(
                         eq(recordings.userId, userId),
                         notInArray(recordings.id, transcribedRecordingIds),
-                        gte(recordings.startTime, oldestAutoTranscribable),
                         lt(
                             recordings.transcriptionFailureCount,
                             TRANSCRIPTION_MAX_FAILURES,
