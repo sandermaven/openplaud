@@ -24,6 +24,7 @@ vi.mock("@/lib/storage/factory", () => ({
     createUserStorageProvider: vi.fn().mockResolvedValue({
         uploadFile: vi.fn().mockResolvedValue(undefined),
         downloadFile: vi.fn().mockResolvedValue(Buffer.from("audio-data")),
+        deleteFile: vi.fn().mockResolvedValue(undefined),
     }),
 }));
 

@@ -38,6 +38,13 @@ services:
 
       # Storage (optional defaults)
       DEFAULT_STORAGE_TYPE: ${DEFAULT_STORAGE_TYPE:-local}
+      # Must point at the `audio` volume below. The app's own default is
+      # ./storage, which resolves inside the image's working directory: a
+      # writable container layer that `docker compose up --build` throws
+      # away. Audio written there survives until the next deploy and then
+      # silently disappears, leaving every recording row pointing at a file
+      # that is no longer on disk.
+      LOCAL_STORAGE_PATH: ${LOCAL_STORAGE_PATH:-/app/audio}
       S3_ENDPOINT: ${S3_ENDPOINT:-}
       S3_BUCKET: ${S3_BUCKET:-}
       S3_REGION: ${S3_REGION:-}

@@ -12,7 +12,12 @@ import { sendNewRecordingBarkNotification } from "@/lib/notifications/bark";
 import { sendNewRecordingEmail } from "@/lib/notifications/email";
 import { createPlaudClient } from "@/lib/plaud/client";
 import { isAccountMigratedError } from "@/lib/plaud/connection-errors";
-import { recordingIdFromNode, toPlaudRecording } from "@/lib/plaud/v4";
+import {
+    isV4VersionKey,
+    recordingIdFromNode,
+    toPlaudRecording,
+    v4VersionKey,
+} from "@/lib/plaud/v4";
 import { createUserStorageProvider } from "@/lib/storage/factory";
 import type { PlaudRecording } from "@/types/plaud";
 
@@ -41,6 +46,12 @@ interface SyncResult {
     pendingTranscriptionIds: string[];
 }
 
+/**
+ * Which Plaud API a recording was listed from. It decides how its version
+ * is stored, so a legacy version is never compared against a 4.0 one.
+ */
+type RecordingSource = "legacy" | "v4";
+
 interface SyncContext {
     userId: string;
     autoTranscribe: boolean;
@@ -58,6 +69,7 @@ async function processRecording(
     context: SyncContext,
     plaudClient: Awaited<ReturnType<typeof createPlaudClient>>,
     storage: Awaited<ReturnType<typeof createUserStorageProvider>>,
+    source: RecordingSource = "legacy",
 ): Promise<{
     status: "new" | "updated" | "skipped" | "error";
     recordingId?: string;
@@ -71,7 +83,10 @@ async function processRecording(
             .where(eq(recordings.plaudFileId, plaudRecording.id))
             .limit(1);
 
-        const versionKey = plaudRecording.version_ms.toString();
+        const versionKey =
+            source === "v4"
+                ? v4VersionKey(plaudRecording.version_ms)
+                : plaudRecording.version_ms.toString();
 
         // Skip if already synced with same version
         if (
@@ -125,6 +140,15 @@ async function processRecording(
                 .update(recordings)
                 .set({ ...recordingData, updatedAt: new Date() })
                 .where(eq(recordings.id, existingRecording.id));
+            // A re-download can land under a different extension (the
+            // legacy API served MP3, 4.0 serves OGG). Nothing else points
+            // at the old object once the row moves, so drop it rather than
+            // leave an orphan next to the new file.
+            if (existingRecording.storagePath !== storageKey) {
+                await storage
+                    .deleteFile(existingRecording.storagePath)
+                    .catch(() => {});
+            }
             return {
                 status: "updated",
                 recordingId: existingRecording.id,
@@ -159,6 +183,7 @@ async function processBatch(
     context: SyncContext,
     plaudClient: Awaited<ReturnType<typeof createPlaudClient>>,
     storage: Awaited<ReturnType<typeof createUserStorageProvider>>,
+    source: RecordingSource = "legacy",
 ): Promise<{
     newCount: number;
     updatedCount: number;
@@ -168,7 +193,7 @@ async function processBatch(
 }> {
     const results = await Promise.allSettled(
         batch.map((rec) =>
-            processRecording(rec, context, plaudClient, storage),
+            processRecording(rec, context, plaudClient, storage, source),
         ),
     );
 
@@ -213,23 +238,36 @@ async function processBatch(
  * skip check needs. So we list first, drop everything already stored at the
  * same version, and only pay for the rest. On a quiet 15-minute cycle that
  * is one request; a full first run costs two per recording.
+ *
+ * A recording that predates the migration is already on disk under a legacy
+ * version that no 4.0 number will ever equal. Downloading those again would
+ * mean re-fetching the entire back catalogue for nothing, so they are
+ * returned separately as `restamp`: same recording, new numbering, keep the
+ * file. Only after that stamp do 4.0 versions start meaning something, and
+ * a genuine edit is picked up from then on.
  */
 async function collectMigratedRecordings(
     userId: string,
     plaudClient: Awaited<ReturnType<typeof createPlaudClient>>,
-): Promise<{ records: PlaudRecording[]; errors: string[] }> {
+): Promise<{
+    records: PlaudRecording[];
+    restamp: Array<{ id: string; versionKey: string }>;
+    errors: string[];
+}> {
     const nodes = await plaudClient.listRecordingNodesV4(
         SYNC_CONFIG.PAGE_SIZE,
         SYNC_CONFIG.MAX_PAGES,
     );
     const errors: string[] = [];
-    if (nodes.length === 0) return { records: [], errors };
+    const restamp: Array<{ id: string; versionKey: string }> = [];
+    if (nodes.length === 0) return { records: [], restamp, errors };
 
     const ids = nodes.map((n) => recordingIdFromNode(n.node_id));
     const stored = await db
         .select({
             plaudFileId: recordings.plaudFileId,
             plaudVersion: recordings.plaudVersion,
+            downloadedAt: recordings.downloadedAt,
         })
         .from(recordings)
         .where(
@@ -238,14 +276,22 @@ async function collectMigratedRecordings(
                 inArray(recordings.plaudFileId, ids),
             ),
         );
-    const storedVersions = new Map(
-        stored.map((r) => [r.plaudFileId, r.plaudVersion]),
-    );
+    const storedRows = new Map(stored.map((r) => [r.plaudFileId, r]));
 
     const records: PlaudRecording[] = [];
     for (const node of nodes) {
         const id = recordingIdFromNode(node.node_id);
-        if (storedVersions.get(id) === node.version_ms.toString()) continue;
+        const row = storedRows.get(id);
+        const versionKey = v4VersionKey(node.version_ms);
+
+        if (row?.plaudVersion === versionKey) continue;
+
+        // Already downloaded, only ever seen through the legacy API: the
+        // audio has not changed, the numbering has. Stamp it and move on.
+        if (row?.downloadedAt && !isV4VersionKey(row.plaudVersion)) {
+            restamp.push({ id, versionKey });
+            continue;
+        }
 
         try {
             const fileId = await plaudClient.resolveFileIdV4(node.node_id);
@@ -256,7 +302,7 @@ async function collectMigratedRecordings(
         }
     }
 
-    return { records, errors };
+    return { records, restamp, errors };
 }
 
 /**
@@ -325,7 +371,10 @@ export async function syncRecordingsForUser(
         const storage = await createUserStorageProvider(userId);
         const allNewRecordingNames: string[] = [];
 
-        const runBatches = async (list: PlaudRecording[]) => {
+        const runBatches = async (
+            list: PlaudRecording[],
+            source: RecordingSource = "legacy",
+        ) => {
             for (
                 let i = 0;
                 i < list.length;
@@ -337,6 +386,7 @@ export async function syncRecordingsForUser(
                     context,
                     plaudClient,
                     storage,
+                    source,
                 );
 
                 result.newRecordings += batchResult.newCount;
@@ -407,12 +457,21 @@ export async function syncRecordingsForUser(
         }
 
         if (migrated) {
-            const { records, errors } = await collectMigratedRecordings(
-                userId,
-                plaudClient,
-            );
+            const { records, restamp, errors } =
+                await collectMigratedRecordings(userId, plaudClient);
             result.errors.push(...errors);
-            await runBatches(records);
+            for (const { id, versionKey } of restamp) {
+                await db
+                    .update(recordings)
+                    .set({ plaudVersion: versionKey })
+                    .where(
+                        and(
+                            eq(recordings.userId, userId),
+                            eq(recordings.plaudFileId, id),
+                        ),
+                    );
+            }
+            await runBatches(records, "v4");
         }
 
         // Update last sync time. If the client auto-redirected to a
@@ -480,7 +539,6 @@ export async function syncRecordingsForUser(
             const cooldown = new Date(
                 Date.now() - TRANSCRIPTION_FAILURE_COOLDOWN_MS,
             );
-
             const untranscribed = await db
                 .select({ id: recordings.id })
                 .from(recordings)

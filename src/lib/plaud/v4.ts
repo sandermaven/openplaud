@@ -32,6 +32,28 @@ const MIGRATED_NODE_PREFIX = "on_w_";
 const MIGRATED_FILE_PREFIX = "of_";
 const NATIVE_NODE_PREFIX = "n_";
 
+/**
+ * Marker on a `recordings.plaud_version` value that came from the 4.0 API.
+ *
+ * The legacy API and 4.0 number their versions independently, so a legacy
+ * value can never be compared against a 4.0 `version_ms`. Without a way to
+ * tell the two apart every pre-migration recording looks changed on the
+ * first 4.0 sync and the whole back catalogue downloads again. Tagging the
+ * 4.0 values keeps that apart: an untagged value means "stored before the
+ * migration", not "changed".
+ */
+const V4_VERSION_PREFIX = "v4:";
+
+/** The `plaud_version` to store for a recording synced through 4.0. */
+export function v4VersionKey(versionMs: number): string {
+    return `${V4_VERSION_PREFIX}${versionMs}`;
+}
+
+/** True when a stored `plaud_version` was written by the 4.0 path. */
+export function isV4VersionKey(stored: string | null): boolean {
+    return stored?.startsWith(V4_VERSION_PREFIX) ?? false;
+}
+
 export interface PlaudV4Node {
     node_id: string;
     name: string;
