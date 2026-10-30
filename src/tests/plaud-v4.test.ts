@@ -3,12 +3,14 @@ import { describe, expect, it } from "vitest";
 import {
     audioObject,
     isNativeV4Node,
+    isV4VersionKey,
     migratedFileId,
     nodeIdFromRecordingId,
     type PlaudV4FileDetail,
     type PlaudV4Node,
     recordingIdFromNode,
     toPlaudRecording,
+    v4VersionKey,
 } from "../lib/plaud/v4";
 
 /** A recording that predates the 4.0 migration, as 4.0 now reports it. */
@@ -120,5 +122,28 @@ describe("toPlaudRecording", () => {
         expect(audioObject(detail)).toBeUndefined();
         expect(rec.filesize).toBe(0);
         expect(rec.filetype).toBe("");
+    });
+});
+
+describe("version keys", () => {
+    it("tags a 4.0 version so it cannot be read as a legacy one", () => {
+        expect(v4VersionKey(1793203280001)).toBe("v4:1793203280001");
+        expect(isV4VersionKey("v4:1793203280001")).toBe(true);
+    });
+
+    it("treats a bare number as a pre-migration version", () => {
+        // This is the whole point: a legacy version must never compare
+        // equal to a 4.0 one, or the first 4.0 sync re-downloads the
+        // entire back catalogue.
+        expect(isV4VersionKey("1793203280001")).toBe(false);
+        expect(v4VersionKey(1793203280001)).not.toBe("1793203280001");
+    });
+
+    it("survives a row that has no version at all", () => {
+        expect(isV4VersionKey(null)).toBe(false);
+    });
+
+    it("stays inside the plaud_version column width", () => {
+        expect(v4VersionKey(Date.now()).length).toBeLessThanOrEqual(50);
     });
 });
