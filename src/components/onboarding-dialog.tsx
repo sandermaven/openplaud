@@ -18,22 +18,13 @@ import {
     DialogHeader,
     DialogTitle,
 } from "@/components/onboarding-dialog-base";
+import {
+    PlaudConnectForm,
+    PlaudTokenStatus,
+    type PlaudTokenStatusData,
+} from "@/components/plaud/plaud-connect-form";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
-import {
-    Select,
-    SelectContent,
-    SelectItem,
-    SelectTrigger,
-    SelectValue,
-} from "@/components/ui/select";
-import {
-    DEFAULT_SERVER_KEY,
-    PLAUD_SERVERS,
-    type PlaudServerKey,
-} from "@/lib/plaud/servers";
 
 type OnboardingStep = "welcome" | "plaud" | "ai-provider" | "complete";
 
@@ -50,10 +41,9 @@ export function OnboardingDialog({
 }: OnboardingDialogProps) {
     const router = useRouter();
     const [step, setStep] = useState<OnboardingStep>("welcome");
-    const [bearerToken, setBearerToken] = useState("");
-    const [refreshToken, setRefreshToken] = useState("");
-    const [server, setServer] = useState<PlaudServerKey>(DEFAULT_SERVER_KEY);
-    const [isLoading, setIsLoading] = useState(false);
+    const [plaudStatus, setPlaudStatus] = useState<PlaudTokenStatusData | null>(
+        null,
+    );
     const [hasPlaudConnection, setHasPlaudConnection] = useState(false);
     const [hasAiProvider, setHasAiProvider] = useState(false);
 
@@ -64,9 +54,7 @@ export function OnboardingDialog({
                 .then((data) => {
                     if (data.connected) {
                         setHasPlaudConnection(true);
-                        if (data.server) {
-                            setServer(data.server as PlaudServerKey);
-                        }
+                        setPlaudStatus(data as PlaudTokenStatusData);
                     }
                 })
                 .catch(() => {});
@@ -89,52 +77,11 @@ export function OnboardingDialog({
     useEffect(() => {
         if (!open) {
             setStep("welcome");
-            setBearerToken("");
-            setRefreshToken("");
-            setServer(DEFAULT_SERVER_KEY);
-            setIsLoading(false);
+            setPlaudStatus(null);
             setHasPlaudConnection(false);
             setHasAiProvider(false);
         }
     }, [open]);
-
-    const handlePlaudConnect = async () => {
-        if (!bearerToken.trim()) {
-            toast.error("Please enter your bearer token");
-            return;
-        }
-
-        setIsLoading(true);
-        try {
-            const response = await fetch("/api/plaud/connect", {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({
-                    bearerToken,
-                    refreshToken: refreshToken.trim() || undefined,
-                    server,
-                }),
-            });
-
-            if (!response.ok) {
-                const error = await response.json();
-                throw new Error(error.error || "Failed to connect");
-            }
-
-            toast.success("Plaud device connected");
-            setHasPlaudConnection(true);
-            setBearerToken("");
-            setRefreshToken("");
-        } catch (error) {
-            toast.error(
-                error instanceof Error
-                    ? error.message
-                    : "Failed to connect to Plaud",
-            );
-        } finally {
-            setIsLoading(false);
-        }
-    };
 
     const handleSkipPlaud = () => {
         setStep("ai-provider");
@@ -294,7 +241,7 @@ export function OnboardingDialog({
                                     Connect Your Plaud Device
                                 </h3>
                                 <p className="text-muted-foreground">
-                                    Enter your Plaud bearer token to sync
+                                    Copy your session from web.plaud.ai to sync
                                     recordings automatically
                                 </p>
                             </div>
@@ -309,7 +256,7 @@ export function OnboardingDialog({
                                                     Device Connected
                                                 </p>
                                                 <p className="text-sm text-muted-foreground">
-                                                    Your Plaud device is already
+                                                    Your Plaud device is
                                                     connected
                                                 </p>
                                             </div>
@@ -323,117 +270,24 @@ export function OnboardingDialog({
                                                 Reconnect
                                             </Button>
                                         </div>
+                                        {plaudStatus && (
+                                            <div className="mt-3 border-t pt-3">
+                                                <PlaudTokenStatus
+                                                    status={plaudStatus}
+                                                />
+                                            </div>
+                                        )}
                                     </CardContent>
                                 </Card>
                             ) : (
                                 <Card className="gap-0 py-4">
-                                    <CardContent className="pt-6 space-y-4">
-                                        <div className="space-y-2">
-                                            <Label htmlFor="api-server">
-                                                API Server
-                                            </Label>
-                                            <Select
-                                                value={server}
-                                                onValueChange={(v) =>
-                                                    setServer(
-                                                        v as PlaudServerKey,
-                                                    )
-                                                }
-                                            >
-                                                <SelectTrigger
-                                                    id="api-server"
-                                                    disabled={isLoading}
-                                                >
-                                                    <SelectValue placeholder="Select API server" />
-                                                </SelectTrigger>
-                                                <SelectContent className="z-[200]">
-                                                    {(
-                                                        Object.entries(
-                                                            PLAUD_SERVERS,
-                                                        ) as [
-                                                            PlaudServerKey,
-                                                            (typeof PLAUD_SERVERS)[PlaudServerKey],
-                                                        ][]
-                                                    ).map(([key, s]) => (
-                                                        <SelectItem
-                                                            key={key}
-                                                            value={key}
-                                                        >
-                                                            {s.label}
-                                                        </SelectItem>
-                                                    ))}
-                                                </SelectContent>
-                                            </Select>
-                                            <p className="text-xs text-muted-foreground">
-                                                {
-                                                    PLAUD_SERVERS[server]
-                                                        .description
-                                                }
-                                            </p>
-                                        </div>
-                                        <div className="space-y-2">
-                                            <Label htmlFor="bearer-token">
-                                                Bearer Token
-                                            </Label>
-                                            <Input
-                                                id="bearer-token"
-                                                type="password"
-                                                placeholder="Enter your Plaud bearer token"
-                                                value={bearerToken}
-                                                onChange={(e) =>
-                                                    setBearerToken(
-                                                        e.target.value,
-                                                    )
-                                                }
-                                                disabled={isLoading}
-                                            />
-                                            <p className="text-xs text-muted-foreground">
-                                                Open plaud.ai in a browser, log
-                                                in, open DevTools (F12) →
-                                                Network tab, refresh and copy
-                                                the Authorization header value
-                                                from any request to the Plaud
-                                                API server.
-                                            </p>
-                                        </div>
-                                        <div className="space-y-2">
-                                            <Label htmlFor="refresh-token">
-                                                Refresh Token (optioneel)
-                                            </Label>
-                                            <Input
-                                                id="refresh-token"
-                                                type="password"
-                                                placeholder="eyJ..."
-                                                value={refreshToken}
-                                                onChange={(e) =>
-                                                    setRefreshToken(
-                                                        e.target.value,
-                                                    )
-                                                }
-                                                disabled={isLoading}
-                                            />
-                                            <p className="text-xs text-muted-foreground">
-                                                Aanbevolen: hiermee vernieuwt de
-                                                koppeling zichzelf, zodat je
-                                                nooit meer handmatig hoeft te
-                                                herkoppelen. In localStorage op
-                                                plaud.ai onder het veld
-                                                refreshToken in de
-                                                workspaceList-entry.
-                                            </p>
-                                        </div>
-
-                                        <Button
-                                            onClick={handlePlaudConnect}
-                                            disabled={
-                                                isLoading || !bearerToken.trim()
-                                            }
-                                            className="w-full"
-                                        >
-                                            {isLoading
-                                                ? "Connecting..."
-                                                : "Connect Device"}
-                                        </Button>
+                                    <CardContent>
+                                        <PlaudConnectForm
+                                            onConnected={(status) => {
+                                                setPlaudStatus(status);
+                                                setHasPlaudConnection(true);
+                                            }}
+                                        />
                                     </CardContent>
                                 </Card>
                             )}

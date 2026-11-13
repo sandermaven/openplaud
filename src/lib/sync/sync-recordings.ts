@@ -360,14 +360,7 @@ export async function syncRecordingsForUser(
             barkPushUrl: settings?.barkPushUrl || null,
         };
 
-        const plaudClient = await createPlaudClient(
-            connection.bearerToken,
-            connection.apiBase,
-            {
-                connectionId: connection.id,
-                encryptedRefreshToken: connection.refreshToken,
-            },
-        );
+        const plaudClient = await createPlaudClient(connection);
         const storage = await createUserStorageProvider(userId);
         const allNewRecordingNames: string[] = [];
 
