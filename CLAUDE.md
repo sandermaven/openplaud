@@ -65,6 +65,34 @@ available"**. Clicking Transcribe then hit a 409 and left the user stuck.
 If you change sync/transcription, preserve the invariant: **the client must
 reconcile with server-side transcriptions it did not trigger.**
 
+## Plaud tokens: lifetimes, refresh, and the shared-session trap
+
+- The connect screen takes the whole `localStorage["pld_session.tokens"]` value
+  from web.plaud.ai (`src/components/plaud/plaud-connect-form.tsx`); parsing and
+  the region-to-server mapping are pure and shared with the connect route
+  (`src/lib/plaud/token-info.ts`). The Console commands are string constants in
+  `src/lib/plaud/connect-commands.ts` and a test asserts they contain only
+  straight quotes. Keep them out of JSX text.
+- Access token ~24h, refresh token ~30 days. `plaud_connections` stores both
+  expiries. Refresh is **proactive** (2h before expiry, on any client creation
+  and on every cron run) and **serialised per connection** with a row lock
+  (`refreshConnection` in `src/lib/plaud/refresh.ts`). Do not go back to
+  refresh-on-419 only: at the expiry moment cron sync, dashboard auto-sync, the
+  audio proxy and transcriptions all hit -419 together and each spent the same
+  rotating refresh token.
+- The refresh call goes to the server named by the token's `region` claim, not
+  blindly to `api_base`.
+- Tokens copied from a browser belong to that browser's Plaud session
+  (`ut_sid`). Other projects report that Plaud revokes them when the web app
+  rotates or ends that session (not verified on this deployment). Hence the
+  private-window advice on the connect screen.
+- A rejected refresh or a dead connection mails the user at most once per 24h
+  (`src/lib/plaud/connection-alerts.ts`, throttle column `last_alert_at`).
+  Needs SMTP and `APP_URL`; the mail only fires from code paths that run, so
+  the cron hitting `/api/cron/sync` must be installed.
+- Refresh attempts log one line each: `[plaud-refresh] connection=… reason=…
+  outcome=ok|reused|rejected|error`. Never log token values.
+
 ## Known issue: duplicate transcription rows
 
 `transcriptions` has **no** unique constraint on `recording_id`, and the

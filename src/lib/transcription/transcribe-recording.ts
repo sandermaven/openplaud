@@ -185,14 +185,7 @@ async function runTranscription(
                     error: "No Plaud connection to re-download audio",
                 };
             }
-            const plaudClient = await createPlaudClient(
-                connection.bearerToken,
-                connection.apiBase,
-                {
-                    connectionId: connection.id,
-                    encryptedRefreshToken: connection.refreshToken,
-                },
-            );
+            const plaudClient = await createPlaudClient(connection);
             audioBuffer = await plaudClient.downloadRecording(
                 recording.plaudFileId,
                 false,
@@ -324,15 +317,8 @@ async function runTranscription(
                                 .limit(1);
 
                             if (connection) {
-                                const plaudClient = await createPlaudClient(
-                                    connection.bearerToken,
-                                    connection.apiBase,
-                                    {
-                                        connectionId: connection.id,
-                                        encryptedRefreshToken:
-                                            connection.refreshToken,
-                                    },
-                                );
+                                const plaudClient =
+                                    await createPlaudClient(connection);
                                 await plaudClient.updateFilename(
                                     recording.plaudFileId,
                                     generatedTitle,

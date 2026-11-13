@@ -40,6 +40,13 @@ export async function GET(request: Request) {
             server,
             syncError: connection?.syncError ?? null,
             syncErrorAt: connection?.syncErrorAt ?? null,
+            apiBase: connection?.apiBase ?? null,
+            hasRefreshToken: !!connection?.refreshToken,
+            accessExpiresAt: connection?.accessExpiresAt ?? null,
+            refreshExpiresAt: connection?.refreshExpiresAt ?? null,
+            lastRefreshAt: connection?.lastRefreshAt ?? null,
+            refreshError: connection?.refreshError ?? null,
+            refreshErrorAt: connection?.refreshErrorAt ?? null,
         });
     } catch (error) {
         console.error("Error checking Plaud connection:", error);

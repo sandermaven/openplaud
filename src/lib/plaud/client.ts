@@ -7,6 +7,7 @@ import type {
 import { isAccountMigratedError } from "./connection-errors";
 import type { TokenRefresher } from "./refresh";
 import { DEFAULT_SERVER_KEY, PLAUD_SERVERS } from "./servers";
+import { stripBearerPrefix } from "./token-info";
 import {
     audioObject,
     migratedFileId,
@@ -90,7 +91,9 @@ export class PlaudClient {
         apiBase: string = DEFAULT_PLAUD_API_BASE,
         refresher?: TokenRefresher,
     ) {
-        this.bearerToken = bearerToken;
+        // Stored tokens may carry the "Bearer " the user copied along; the
+        // header below adds its own.
+        this.bearerToken = stripBearerPrefix(bearerToken);
         this.apiBase = apiBase;
         this.refresher = refresher;
     }
@@ -102,6 +105,28 @@ export class PlaudClient {
      */
     getApiBase(): string {
         return this.apiBase;
+    }
+
+    /**
+     * Swap the expired access token for a fresh one. Resolves to false when
+     * there is no refresher or the refresh failed, so the caller surfaces the
+     * original error and the reconnect flow takes over.
+     */
+    private async tryRefresh(): Promise<boolean> {
+        if (!this.refresher) return false;
+        const stale = this.bearerToken;
+        const newToken = await this.refresher(this.apiBase, stale).catch(
+            (error) => {
+                console.error(
+                    "[plaud] token refresh failed:",
+                    error instanceof Error ? error.message : error,
+                );
+                return null;
+            },
+        );
+        if (!newToken) return false;
+        this.bearerToken = stripBearerPrefix(newToken);
+        return true;
     }
 
     /**
@@ -147,6 +172,20 @@ export class PlaudClient {
                 );
             }
 
+            // Plaud normally reports an expired token as -419 in a 200 body
+            // (handled below); a plain 401 gets the same treatment.
+            if (response.status === 401 && !refreshed) {
+                if (await this.tryRefresh()) {
+                    return this.request<T>(
+                        endpoint,
+                        options,
+                        0,
+                        regionRedirected,
+                        true,
+                    );
+                }
+            }
+
             if (!response.ok) {
                 const error = await parseJsonBody<PlaudApiError>(response);
                 const errorMessage = `Plaud API error (${response.status}): ${error.msg || response.statusText}`;
@@ -163,6 +202,7 @@ export class PlaudClient {
                         options,
                         retryCount + 1,
                         regionRedirected,
+                        refreshed,
                     );
                 }
 
@@ -200,22 +240,8 @@ export class PlaudClient {
 
                 // -419 = "workspace token expired". If we have a refresh token,
                 // rotate the bearer token once and retry instead of failing.
-                if (
-                    isTokenExpired(data.status, data.msg) &&
-                    this.refresher &&
-                    !refreshed
-                ) {
-                    const newToken = await this.refresher(this.apiBase).catch(
-                        (error) => {
-                            console.error(
-                                "[plaud] token refresh failed:",
-                                error,
-                            );
-                            return null;
-                        },
-                    );
-                    if (newToken) {
-                        this.bearerToken = newToken;
+                if (isTokenExpired(data.status, data.msg) && !refreshed) {
+                    if (await this.tryRefresh()) {
                         return this.request<T>(
                             endpoint,
                             options,
@@ -489,31 +515,47 @@ export class PlaudClient {
     }
 }
 
+/** The columns of a `plaud_connections` row a client is built from. */
+export interface PlaudConnectionCredentials {
+    id: string;
+    bearerToken: string;
+    refreshToken: string | null;
+    apiBase: string;
+    accessExpiresAt: Date | null;
+    refreshError: string | null;
+    refreshErrorAt: Date | null;
+}
+
 /**
- * Create Plaud client from an encrypted bearer token.
+ * Create a Plaud client for a stored connection.
  *
- * When `refresh` is supplied and the connection has an encrypted refresh
- * token, the client auto-rotates the bearer token on -419 and persists the
- * new tokens, so an expired workspace token self-heals without a reconnect.
+ * If the access token is close to expiring and the connection has a refresh
+ * token, it is rotated first (and the new pair persisted), so callers do not
+ * run into the expiry mid-request. Should a token still expire under a
+ * running client, the -419 path refreshes and retries once.
  */
 export async function createPlaudClient(
-    encryptedToken: string,
-    apiBase: string = DEFAULT_PLAUD_API_BASE,
-    refresh?: { connectionId: string; encryptedRefreshToken: string | null },
+    connection: PlaudConnectionCredentials,
 ): Promise<PlaudClient> {
     const { decrypt } = await import("../encryption");
-    const bearerToken = decrypt(encryptedToken);
+    const { createTokenRefresher, needsProactiveRefresh, refreshConnection } =
+        await import("./refresh");
 
-    let refresher: TokenRefresher | undefined;
-    if (refresh?.encryptedRefreshToken) {
-        const { createTokenRefresher } = await import("./refresh");
-        refresher = createTokenRefresher(
-            refresh.connectionId,
-            refresh.encryptedRefreshToken,
-        );
+    let bearerToken: string | null = null;
+    if (needsProactiveRefresh(connection)) {
+        // A failed proactive refresh is recorded and reported by
+        // refreshConnection; the current token still has time left.
+        bearerToken = await refreshConnection(connection.id, {
+            reason: "proactive",
+        }).catch(() => null);
     }
+    bearerToken ??= decrypt(connection.bearerToken);
 
-    return new PlaudClient(bearerToken, apiBase, refresher);
+    const refresher = connection.refreshToken
+        ? createTokenRefresher(connection.id)
+        : undefined;
+
+    return new PlaudClient(bearerToken, connection.apiBase, refresher);
 }
 
 export * from "./types";

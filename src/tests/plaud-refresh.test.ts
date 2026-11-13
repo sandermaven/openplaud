@@ -66,7 +66,10 @@ describe("PlaudClient token refresh on -419", () => {
         const result = await client.listDevices();
 
         expect(refresher).toHaveBeenCalledTimes(1);
-        expect(refresher).toHaveBeenCalledWith(DEFAULT_PLAUD_API_BASE);
+        expect(refresher).toHaveBeenCalledWith(
+            DEFAULT_PLAUD_API_BASE,
+            "stale-token",
+        );
         // Retry must carry the refreshed token, not the stale one.
         expect(mockFetch).toHaveBeenCalledTimes(2);
         expect(mockFetch.mock.calls[1][1].headers.Authorization).toBe(
