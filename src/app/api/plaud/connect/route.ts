@@ -10,6 +10,11 @@ import {
     PLAUD_SERVERS,
     type PlaudServerKey,
 } from "@/lib/plaud/servers";
+import {
+    describeTokens,
+    type ParsedPlaudCredentials,
+    parseSessionTokens,
+} from "@/lib/plaud/token-info";
 
 export async function POST(request: Request) {
     try {
@@ -24,31 +29,64 @@ export async function POST(request: Request) {
             );
         }
 
-        const {
-            bearerToken,
-            refreshToken,
-            server: serverKey,
-        } = await request.json();
+        const body = (await request.json()) as {
+            sessionTokens?: unknown;
+            bearerToken?: unknown;
+            refreshToken?: unknown;
+            server?: unknown;
+        };
 
-        if (!bearerToken) {
+        // Preferred input: the whole `pld_session.tokens` value from
+        // web.plaud.ai, which carries both tokens. The separate fields remain
+        // as a fallback.
+        let credentials: ParsedPlaudCredentials | null = null;
+        if (
+            typeof body.sessionTokens === "string" &&
+            body.sessionTokens.trim()
+        ) {
+            credentials = parseSessionTokens(body.sessionTokens);
+            if (!credentials) {
+                return NextResponse.json(
+                    {
+                        error: "Could not read the pasted session. Expected the value of pld_session.tokens (JSON with a byWsId entry).",
+                    },
+                    { status: 400 },
+                );
+            }
+        } else if (typeof body.bearerToken === "string") {
+            credentials = describeTokens(
+                body.bearerToken,
+                typeof body.refreshToken === "string"
+                    ? body.refreshToken
+                    : null,
+            );
+        }
+
+        if (!credentials) {
             return NextResponse.json(
                 { error: "Bearer token is required" },
                 { status: 400 },
             );
         }
 
-        // Optional: the refresh token enables server-side auto-rotation of the
-        // bearer token on expiry (-419), so the connection never needs a manual
-        // reconnect. Nullable — connections without it fall back to the banner.
-        const refreshTokenValue =
-            typeof refreshToken === "string" && refreshToken.trim()
-                ? refreshToken.trim()
-                : null;
-        const encryptedRefreshToken = refreshTokenValue
-            ? encrypt(refreshTokenValue)
+        const { bearerToken } = credentials;
+
+        // Optional: the refresh token enables server-side rotation of the
+        // bearer token before it expires, so the connection does not need a
+        // manual reconnect every 24 hours.
+        const encryptedRefreshToken = credentials.refreshToken
+            ? encrypt(credentials.refreshToken)
             : null;
 
-        const resolvedKey = (serverKey ?? DEFAULT_SERVER_KEY) as string;
+        // An explicit choice wins; otherwise the token's own `region` claim
+        // decides, and only then the default. A wrong guess is still
+        // corrected by the -302 redirect during validation below.
+        const requestedKey =
+            typeof body.server === "string" && body.server !== "auto"
+                ? body.server
+                : null;
+        const resolvedKey: string =
+            requestedKey ?? credentials.serverKey ?? DEFAULT_SERVER_KEY;
         if (!Object.hasOwn(PLAUD_SERVERS, resolvedKey)) {
             return NextResponse.json(
                 { error: `Unknown server: ${resolvedKey}` },
@@ -70,7 +108,6 @@ export async function POST(request: Request) {
                 error instanceof Error ? error.message : "Invalid bearer token";
             return NextResponse.json({ error: message }, { status: 400 });
         }
-        console.log("Plaud device list response:", JSON.stringify(deviceList));
 
         const resolvedApiBase = client.getApiBase();
 
@@ -91,11 +128,17 @@ export async function POST(request: Request) {
                     // Only overwrite the stored refresh token when a new one is
                     // supplied, so a bearer-only reconnect keeps auto-refresh.
                     ...(encryptedRefreshToken
-                        ? { refreshToken: encryptedRefreshToken }
+                        ? {
+                              refreshToken: encryptedRefreshToken,
+                              refreshExpiresAt: credentials.refreshExpiresAt,
+                          }
                         : {}),
+                    accessExpiresAt: credentials.accessExpiresAt,
                     // A fresh token clears any prior expiry error.
                     syncError: null,
                     syncErrorAt: null,
+                    refreshError: null,
+                    refreshErrorAt: null,
                     updatedAt: new Date(),
                 })
                 .where(eq(plaudConnections.id, existingConnection.id));
@@ -105,6 +148,8 @@ export async function POST(request: Request) {
                 bearerToken: encryptedToken,
                 refreshToken: encryptedRefreshToken,
                 apiBase: resolvedApiBase,
+                accessExpiresAt: credentials.accessExpiresAt,
+                refreshExpiresAt: credentials.refreshExpiresAt,
             });
         }
 
@@ -142,9 +187,22 @@ export async function POST(request: Request) {
             }
         }
 
+        // Bearer-only reconnect keeps the refresh token that was already
+        // stored, so report what is actually on the row.
+        const hasRefreshToken =
+            !!encryptedRefreshToken || !!existingConnection?.refreshToken;
+        const refreshExpiresAt = encryptedRefreshToken
+            ? credentials.refreshExpiresAt
+            : (existingConnection?.refreshExpiresAt ?? null);
+
         return NextResponse.json({
             success: true,
             devices,
+            apiBase: resolvedApiBase,
+            region: credentials.region,
+            accessExpiresAt: credentials.accessExpiresAt,
+            refreshExpiresAt,
+            hasRefreshToken,
         });
     } catch (error) {
         console.error("Error connecting to Plaud:", error);

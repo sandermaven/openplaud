@@ -88,6 +88,20 @@ export const plaudConnections = pgTable("plaud_connections", {
     // Cleared on the next successful sync. Drives the dashboard reconnect banner.
     syncError: text("sync_error"),
     syncErrorAt: timestamp("sync_error_at", { withTimezone: true }),
+    // When the stored tokens expire, read from their `exp` claims. Drives the
+    // proactive refresh (rotate before the access token ages out) and the
+    // expiry dates shown after connecting.
+    accessExpiresAt: timestamp("access_expires_at", { withTimezone: true }),
+    refreshExpiresAt: timestamp("refresh_expires_at", { withTimezone: true }),
+    lastRefreshAt: timestamp("last_refresh_at", { withTimezone: true }),
+    // Outcome of the last failed refresh (status only, never token material).
+    // Cleared by the next successful refresh or reconnect.
+    refreshError: text("refresh_error"),
+    refreshErrorAt: timestamp("refresh_error_at", { withTimezone: true }),
+    // Last time the user was mailed about this connection. Unlike
+    // syncErrorAt it survives a healthy sync, so a flapping connection still
+    // produces at most one mail a day.
+    lastAlertAt: timestamp("last_alert_at", { withTimezone: true }),
     createdAt: timestamp("created_at").notNull().defaultNow(),
     updatedAt: timestamp("updated_at").notNull().defaultNow(),
 });

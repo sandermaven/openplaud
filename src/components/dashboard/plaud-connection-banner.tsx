@@ -12,17 +12,26 @@ import { Button } from "@/components/ui/button";
  */
 export function PlaudConnectionBanner() {
     const [syncError, setSyncError] = useState<string | null>(null);
+    // Set when the refresh was rejected while the bearer token still works:
+    // the connection is about to lapse rather than already gone.
+    const [expiresAt, setExpiresAt] = useState<Date | null>(null);
 
     useEffect(() => {
         fetch("/api/plaud/connection")
             .then((res) => res.json())
             .then((data) => {
-                if (data.syncError) setSyncError(data.syncError as string);
+                if (data.syncError) {
+                    setSyncError(data.syncError as string);
+                } else if (data.refreshError && data.accessExpiresAt) {
+                    setExpiresAt(new Date(data.accessExpiresAt as string));
+                }
             })
             .catch(() => {});
     }, []);
 
-    if (!syncError) return null;
+    if (!syncError && !expiresAt) return null;
+
+    const expiring = !syncError && expiresAt !== null;
 
     return (
         <div className="mb-6 flex flex-col gap-3 rounded-lg border border-red-500/50 bg-red-500/10 p-4 sm:flex-row sm:items-center sm:justify-between">
@@ -30,11 +39,17 @@ export function PlaudConnectionBanner() {
                 <AlertTriangle className="mt-0.5 h-5 w-5 shrink-0 text-red-600 dark:text-red-400" />
                 <div>
                     <p className="font-medium text-red-700 dark:text-red-300">
-                        Je Plaud-koppeling is verlopen
+                        {expiring
+                            ? "Automatisch vernieuwen van je Plaud-koppeling is mislukt"
+                            : "Je Plaud-koppeling is verlopen"}
                     </p>
                     <p className="text-sm text-red-700/80 dark:text-red-300/80">
-                        Transcripties komen niet binnen. Koppel je Plaud-account
-                        opnieuw om het herstellen.
+                        {expiring
+                            ? `De koppeling werkt nog tot ${expiresAt?.toLocaleString(
+                                  "nl-NL",
+                                  { dateStyle: "long", timeStyle: "short" },
+                              )}. Koppel je Plaud-account opnieuw om dat voor te zijn.`
+                            : "Transcripties komen niet binnen. Koppel je Plaud-account opnieuw om het te herstellen."}
                     </p>
                 </div>
             </div>

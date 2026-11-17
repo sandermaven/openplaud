@@ -1,74 +1,35 @@
 import { eq } from "drizzle-orm";
 import { after, NextResponse } from "next/server";
 import { db } from "@/db";
-import { plaudConnections, userSettings, users } from "@/db/schema";
+import { plaudConnections, userSettings } from "@/db/schema";
 import { env } from "@/lib/env";
-import { sendEmail } from "@/lib/notifications/email";
+import { alertConnectionProblem } from "@/lib/plaud/connection-alerts";
 import { isConnectionExpiredError } from "@/lib/plaud/connection-errors";
+import { refreshIfDue } from "@/lib/plaud/refresh";
 import { syncRecordingsForUser } from "@/lib/sync/sync-recordings";
 import { transcribeRecording } from "@/lib/transcription/transcribe-recording";
 
 export const maxDuration = 300; // 5 minutes
 
-/** Only re-notify a user about an expired connection once per 12 hours. */
-const CONNECTION_ERROR_NOTIFY_COOLDOWN_MS = 12 * 60 * 60 * 1000;
-
-const RECONNECT_PATH = "/onboarding?reconnect=1";
-
-type SyncConnection = {
-    id: string;
-    userId: string;
-    syncError: string | null;
-    syncErrorAt: Date | null;
-};
+type SyncConnection = typeof plaudConnections.$inferSelect;
 
 /**
- * Persist a connection-expired failure and email the user once per cooldown.
- * The existing syncErrorAt is kept while inside the cooldown so the 12h window
- * is measured from the first notification, not from every failing run.
+ * Persist a connection-expired failure for the dashboard banner and mail the
+ * user. The mail is rate-limited to one a day inside alertConnectionProblem.
  */
 async function recordConnectionError(
     connection: SyncConnection,
     message: string,
 ): Promise<void> {
-    const now = new Date();
-    const shouldNotify =
-        !connection.syncErrorAt ||
-        now.getTime() - connection.syncErrorAt.getTime() >
-            CONNECTION_ERROR_NOTIFY_COOLDOWN_MS;
-
     await db
         .update(plaudConnections)
         .set({
             syncError: message,
-            ...(shouldNotify ? { syncErrorAt: now } : {}),
+            ...(connection.syncErrorAt ? {} : { syncErrorAt: new Date() }),
         })
         .where(eq(plaudConnections.id, connection.id));
 
-    if (!shouldNotify) return;
-
-    const [settings] = await db
-        .select({ notificationEmail: userSettings.notificationEmail })
-        .from(userSettings)
-        .where(eq(userSettings.userId, connection.userId))
-        .limit(1);
-    const [user] = await db
-        .select({ email: users.email })
-        .from(users)
-        .where(eq(users.id, connection.userId))
-        .limit(1);
-
-    const to = settings?.notificationEmail || user?.email;
-    if (!to) return;
-
-    const url = `${env.APP_URL}${RECONNECT_PATH}`;
-    const text = `Je Plaud-koppeling is verlopen; transcripties komen niet binnen. Herstel via ${RECONNECT_PATH}`;
-    await sendEmail({
-        to,
-        subject: "Je Plaud-koppeling is verlopen",
-        html: `<p>Je Plaud-koppeling is verlopen; transcripties komen niet binnen. Herstel via <a href="${url}">${RECONNECT_PATH}</a>.</p>`,
-        text,
-    });
+    await alertConnectionProblem(connection.id, "expired");
 }
 
 /** Clear a previously stored connection error after a healthy sync. */
@@ -92,14 +53,7 @@ export async function GET(request: Request) {
     }
 
     // Find all users with a Plaud connection
-    const connections = await db
-        .select({
-            id: plaudConnections.id,
-            userId: plaudConnections.userId,
-            syncError: plaudConnections.syncError,
-            syncErrorAt: plaudConnections.syncErrorAt,
-        })
-        .from(plaudConnections);
+    const connections = await db.select().from(plaudConnections);
 
     if (connections.length === 0) {
         return NextResponse.json({
@@ -132,7 +86,12 @@ export async function GET(request: Request) {
                 .limit(1);
 
             const autoSyncEnabled = settings[0]?.autoSyncEnabled ?? true;
-            if (!autoSyncEnabled) continue;
+            if (!autoSyncEnabled) {
+                // No sync, but keep the tokens alive: once the refresh token
+                // lapses only a manual reconnect brings the connection back.
+                await refreshIfDue(connection);
+                continue;
+            }
 
             const result = await syncRecordingsForUser(userId);
 

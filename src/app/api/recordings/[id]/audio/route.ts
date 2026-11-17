@@ -162,14 +162,7 @@ export async function GET(
                 .limit(1);
 
             if (connection) {
-                const plaudClient = await createPlaudClient(
-                    connection.bearerToken,
-                    connection.apiBase,
-                    {
-                        connectionId: connection.id,
-                        encryptedRefreshToken: connection.refreshToken,
-                    },
-                );
+                const plaudClient = await createPlaudClient(connection);
                 // Migrated (Plaud 4.0) accounts have no temp-url endpoint
                 // left; their presigned URL comes off the file detail in
                 // the 4.0 tree instead.
