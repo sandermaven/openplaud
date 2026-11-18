@@ -56,6 +56,9 @@ const envSchema = z.object({
     // Notion integration (optional env-var fallback so config survives redeploys)
     NOTION_TOKEN: z.string().optional(),
     NOTION_DATABASE_ID: z.string().optional(),
+    // Optional override for the "MT transcripties" database id; falls back to
+    // DEFAULT_MT_DATABASE_ID in src/lib/notion/targets.ts when unset.
+    NOTION_MT_DATABASE_ID: z.string().optional(),
 });
 
 export type Env = z.infer<typeof envSchema>;
@@ -93,6 +96,7 @@ function validateEnv(): Env {
             CRON_SECRET: process.env.CRON_SECRET,
             NOTION_TOKEN: process.env.NOTION_TOKEN,
             NOTION_DATABASE_ID: process.env.NOTION_DATABASE_ID,
+            NOTION_MT_DATABASE_ID: process.env.NOTION_MT_DATABASE_ID,
         });
 
         // In runtime (dev/prod servers), we require a strong encryption key.
