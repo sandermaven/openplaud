@@ -24,9 +24,7 @@ const MT_CADENCE_PATTERN = new RegExp(
  * written to the "MT transcripties" database. Blank/missing titles route to
  * Master.
  */
-export function isMtCadenceTitle(
-    title: string | null | undefined,
-): boolean {
+export function isMtCadenceTitle(title: string | null | undefined): boolean {
     if (!title) return false;
     return MT_CADENCE_PATTERN.test(title);
 }

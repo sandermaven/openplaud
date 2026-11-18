@@ -1,9 +1,17 @@
 import { eq } from "drizzle-orm";
 import { db } from "@/db";
 import { recordings, transcriptions } from "@/db/schema";
+import { env } from "@/lib/env";
 import { buildNotionPageContent } from "@/lib/notion/blocks";
 import { createNotionClientFromToken } from "@/lib/notion/client";
 import { getNotionConfig } from "@/lib/notion/config";
+import { isMtCadenceTitle } from "@/lib/notion/routing";
+import {
+    buildTranscriptionProperties,
+    DEFAULT_MT_DATABASE_ID,
+    masterTarget,
+    mtTarget,
+} from "@/lib/notion/targets";
 
 /**
  * Format duration in milliseconds to a human-readable string like "19m 45s"
@@ -91,43 +99,22 @@ export async function syncTranscriptionToNotion(
             recording.duration,
         );
 
-        // Build page properties
-        const properties: Record<string, unknown> = {
-            Name: {
-                title: [{ text: { content: pageTitle } }],
-            },
-            Type: {
-                select: { name: "Transcript" },
-            },
-            Bron: {
-                select: { name: "Plaud" },
-            },
-            Status: {
-                status: { name: "Inbox" },
-            },
-            Duration: {
-                rich_text: [
-                    {
-                        text: {
-                            content: formatDuration(recording.duration),
-                        },
-                    },
-                ],
-            },
-            Recorded: {
-                date: {
-                    start: recording.startTime.toISOString(),
-                },
-            },
-        };
+        // MT-cadence recordings (MT/Monthly/Quarterly/Yearly/Unbound) go to a
+        // separate "MT transcripties" database; everything else to Master.
+        const isMt = isMtCadenceTitle(recording.filename);
+        const target = isMt
+            ? mtTarget(env.NOTION_MT_DATABASE_ID ?? DEFAULT_MT_DATABASE_ID)
+            : masterTarget(config.databaseId);
 
-        // Add language if detected
-        const language = txn.detectedLanguage?.toLowerCase();
-        if (language === "dutch" || language === "english") {
-            properties.Language = {
-                select: { name: language },
-            };
-        }
+        // Build page properties shaped for the chosen target database
+        const properties = buildTranscriptionProperties(target, {
+            pageTitle,
+            durationText: formatDuration(recording.duration),
+            startTimeIso: recording.startTime.toISOString(),
+            detectedLanguage: txn.detectedLanguage ?? null,
+        });
+
+        console.log(`[notion-sync] target=${isMt ? "MT" : "Master"}`);
 
         // Build page content blocks (transcription text)
         const blockBatches = buildNotionPageContent({
@@ -138,7 +125,7 @@ export async function syncTranscriptionToNotion(
 
         // Create the Notion page with first batch of blocks
         const page = await notion.pages.create({
-            parent: { database_id: config.databaseId },
+            parent: { database_id: target.databaseId },
             properties: properties as Parameters<
                 typeof notion.pages.create
             >[0]["properties"],
